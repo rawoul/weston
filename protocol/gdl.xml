@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<protocol name="gdl">
+
+  <interface name="wl_gdl" version="2">
+    <description summary="interface for IntelCE GDL planes and buffers">
+      This interface offers a way to create GDL based wl_buffers, that can be
+      used as scanout on a hardware plane instead of compositing to a
+      framebuffer.
+    </description>
+
+    <enum name="error">
+      <entry name="invalid_surface" value="0"/>
+      <entry name="invalid_plane" value="1"/>
+    </enum>
+
+    <request name="create_buffer">
+      <description summary="create a GDL based wl_buffer">
+        Create a GDL based wl_buffer that can be used as scanout on a hardware
+        plane instead of compositing to a framebuffer. This also allows using
+        pixel formats supported by GDL UPP planes, which might not be rendered
+        correctly by the SRB based renderer.
+      </description>
+      <arg name="id" type="new_id" interface="wl_buffer"/>
+      <arg name="surface" type="uint"/>
+      <arg name="colorspace" type="uint"/>
+    </request>
+
+    <request name="create_sideband_buffer">
+      <description summary="create a wl_buffer for the ISMD video renderer">
+        Create a fake wl_buffer, that is tied to the specified GDL UPP plane.
+        This allows weston to work properly when a client is using the ISMD
+        video rendering API. The ISMD vidrend driver will flip frames to the
+        GDL plane, while the compositor configures the plane geometry and
+        alpha.
+      </description>
+      <arg name="id" type="new_id" interface="wl_buffer"/>
+      <arg name="plane" type="uint"/>
+      <arg name="width" type="uint"/>
+      <arg name="height" type="uint"/>
+    </request>
+
+    <request name="acquire_plane" since="2">
+      <description summary="acquire a GDL plane for exclusive usage">
+        Acquire total control of a GDL UPP plane until the resource is
+        released. This guarantees the client that the compositor will not
+        change this plane properties or flip a GDL surface on it.
+      </description>
+      <arg name="id" type="new_id" interface="wl_gdl_plane"/>
+      <arg name="plane" type="uint"/>
+    </request>
+  </interface>
+
+  <interface name="wl_gdl_plane" version="1">
+    <request name="get_buffer">
+      <description summary="create a wl_buffer for this plane">
+        Create a fake wl_buffer to allow the client to stack the planes
+        correctly using wl_subsurfaces and a shell surface, and to be able to
+        get input focus.
+      </description>
+      <arg name="id" type="new_id" interface="wl_buffer"/>
+      <arg name="width" type="uint"/>
+      <arg name="height" type="uint"/>
+    </request>
+
+    <request name="release" type="destructor"/>
+  </interface>
+
+</protocol>

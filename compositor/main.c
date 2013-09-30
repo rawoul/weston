@@ -61,6 +61,7 @@
 #include "compositor-headless.h"
 #include "compositor-rdp.h"
 #include "compositor-fbdev.h"
+#include "compositor-ice.h"
 #include "compositor-x11.h"
 #include "compositor-wayland.h"
 #include "windowed-output-api.h"
@@ -526,6 +527,9 @@ usage(int error_code)
 #if defined(BUILD_FBDEV_COMPOSITOR)
 			"\t\t\t\tfbdev-backend.so\n"
 #endif
+#if defined(BUILD_ICE_COMPOSITOR)
+			"\t\t\t\tice-backend.so\n"
+#endif
 #if defined(BUILD_HEADLESS_COMPOSITOR)
 			"\t\t\t\theadless-backend.so\n"
 #endif
@@ -562,6 +566,13 @@ usage(int error_code)
 		"Options for fbdev-backend.so:\n\n"
 		"  --tty=TTY\t\tThe tty to use\n"
 		"  --device=DEVICE\tThe framebuffer device to use\n"
+		"\n");
+#endif
+
+#if defined(BUILD_ICE_COMPOSITOR)
+	fprintf(stderr,
+		"Options for ice-backend.so:\n\n"
+		"  --use-pixman\t\tUse the pixman (CPU) renderer\n"
 		"\n");
 #endif
 
@@ -1389,6 +1400,25 @@ out:
 	return ret;
 }
 
+static int
+load_ice_backend(struct weston_compositor *c,
+		 int *argc, char **argv, struct weston_config *wc)
+{
+	struct weston_ice_backend_config config = {{ 0, }};
+
+	const struct weston_option ice_options[] = {
+		{ WESTON_OPTION_BOOLEAN, "use-pixman", 0, &config.use_pixman },
+	};
+
+	parse_options(ice_options, ARRAY_LENGTH(ice_options), argc, argv);
+
+	config.base.struct_version = WESTON_ICE_BACKEND_CONFIG_VERSION;
+	config.base.struct_size = sizeof(struct weston_ice_backend_config);
+
+	return weston_compositor_load_backend(c, WESTON_BACKEND_ICE,
+					      &config.base);
+}
+
 static void
 x11_backend_output_configure(struct wl_listener *listener, void *data)
 {
@@ -1642,6 +1672,8 @@ load_backend(struct weston_compositor *compositor, const char *backend,
 		return load_rdp_backend(compositor, argc, argv, config);
 	else if (strstr(backend, "fbdev-backend.so"))
 		return load_fbdev_backend(compositor, argc, argv, config);
+	else if (strstr(backend, "ice-backend.so"))
+		return load_ice_backend(compositor, argc, argv, config);
 	else if (strstr(backend, "drm-backend.so"))
 		return load_drm_backend(compositor, argc, argv, config);
 	else if (strstr(backend, "x11-backend.so"))

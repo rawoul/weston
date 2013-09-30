@@ -252,6 +252,17 @@ if test x$enable_headless_compositor = xyes; then
 fi
 
 
+AC_ARG_ENABLE(ice-compositor,
+	      AS_HELP_STRING([--enable-ice-compositor],
+	                     [build the IntelCE backend]),,
+	      enable_ice_compositor=no)
+AM_CONDITIONAL(ENABLE_ICE_COMPOSITOR, test "x$enable_ice_compositor" = "xyes")
+if test "x$enable_ice_compositor" = "xyes"; then
+  AC_DEFINE([BUILD_ICE_COMPOSITOR], [1], [Build the compositor for IntelCE SOC])
+  PKG_CHECK_MODULES(ICE_COMPOSITOR, [system_utils gdl gma srb])
+fi
+
+
 AC_ARG_ENABLE([fbdev-compositor], [  --enable-fbdev-compositor],,
               enable_fbdev_compositor=yes)
 AM_CONDITIONAL([ENABLE_FBDEV_COMPOSITOR],
@@ -726,6 +737,7 @@ AC_MSG_RESULT([
 	Headless Compositor		${enable_headless_compositor}
 	FBDEV Compositor		${enable_fbdev_compositor}
 	RDP Compositor			${enable_rdp_compositor}
+	IntelCE Compositor		${enable_ice_compositor}
 	Screen Sharing			${enable_screen_sharing}
 	JUnit XML output		${enable_junit_xml}
 

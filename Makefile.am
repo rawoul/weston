@@ -432,6 +432,31 @@ fbdev_backend_la_SOURCES =			\
 	$(INPUT_BACKEND_SOURCES)
 endif
 
+if ENABLE_ICE_COMPOSITOR
+libweston_module_LTLIBRARIES += ice-backend.la
+ice_backend_la_LDFLAGS = -module -avoid-version
+ice_backend_la_LIBADD =				\
+	$(COMPOSITOR_LIBS)			\
+	$(ICE_COMPOSITOR_LIBS)			\
+	libshared.la
+ice_backend_la_CPPFLAGS =			\
+	$(AM_CPPFLAGS)				\
+	-I$(top_srcdir)/xwayland
+ice_backend_la_CFLAGS =				\
+	$(COMPOSITOR_CFLAGS)			\
+	$(ICE_COMPOSITOR_CFLAGS)		\
+	$(PIXMAN_CFLAGS)			\
+	$(AM_CFLAGS)
+ice_backend_la_SOURCES =			\
+	libweston/compositor-ice.c		\
+	libweston/ice-renderer.c		\
+	xwayland/hash.c
+nodist_ice_backend_la_SOURCES =			\
+	protocol/gdl-protocol.c			\
+	protocol/gdl-server-protocol.h
+BUILT_SOURCES += $(nodist_ice_backend_la_SOURCES)
+endif
+
 if ENABLE_RDP_COMPOSITOR
 libweston_module_LTLIBRARIES += rdp-backend.la
 rdp_backend_la_LDFLAGS = -module -avoid-version
@@ -1452,7 +1477,8 @@ EXTRA_DIST +=					\
 	protocol/text-cursor-position.xml	\
 	protocol/weston-test.xml		\
 	protocol/ivi-application.xml		\
-	protocol/ivi-hmi-controller.xml
+	protocol/ivi-hmi-controller.xml		\
+	protocol/gdl.xml
 
 #
 # manual test modules in tests subdirectory
