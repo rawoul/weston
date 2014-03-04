@@ -35,6 +35,7 @@
 #include <dlfcn.h>
 #include <stdint.h>
 #include <string.h>
+#include <fcntl.h>
 #include <sys/utsname.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -1699,6 +1700,7 @@ int main(int argc, char *argv[])
 	char *log = NULL;
 	char *server_socket = NULL;
 	int32_t idle_time = -1;
+	int32_t daemonize = 0;
 	int32_t help = 0;
 	char *socket_name = NULL;
 	int32_t version = 0;
@@ -1711,6 +1713,7 @@ int main(int argc, char *argv[])
 	struct wl_listener primary_client_destroyed;
 	struct weston_seat *seat;
 	struct wet_compositor user_data;
+	int pipefd[2];
 
 	const struct weston_option core_options[] = {
 		{ WESTON_OPTION_STRING, "backend", 'B', &backend },
@@ -1719,6 +1722,7 @@ int main(int argc, char *argv[])
 		{ WESTON_OPTION_INTEGER, "idle-time", 'i', &idle_time },
 		{ WESTON_OPTION_STRING, "modules", 0, &option_modules },
 		{ WESTON_OPTION_STRING, "log", 0, &log },
+		{ WESTON_OPTION_BOOLEAN, "daemonize", 'd', &daemonize },
 		{ WESTON_OPTION_BOOLEAN, "help", 'h', &help },
 		{ WESTON_OPTION_BOOLEAN, "version", 0, &version },
 		{ WESTON_OPTION_BOOLEAN, "no-config", 0, &noconfig },
@@ -1754,6 +1758,30 @@ int main(int argc, char *argv[])
 	log_uname();
 
 	verify_xdg_runtime_dir();
+
+	if (daemonize) {
+		pid_t pid;
+
+		if (pipe2(pipefd, O_CLOEXEC) < 0) {
+			weston_log("fatal: pipe2 failed: %m\n");
+			return EXIT_FAILURE;
+		}
+
+		pid = fork();
+		if (pid < 0) {
+			weston_log("fatal: fork failed: %m\n");
+			return EXIT_FAILURE;
+		}
+
+		if (pid > 0) {
+			close(pipefd[1]);
+			if (read(pipefd[0], &ret, sizeof (ret)) <= 0)
+				ret = EXIT_FAILURE;
+			_exit(ret);
+		}
+
+		close(pipefd[0]);
+	}
 
 	display = wl_display_create();
 
@@ -1871,6 +1899,27 @@ int main(int argc, char *argv[])
 		weston_log("fatal: unhandled option: %s\n", argv[i]);
 	if (argc > 1)
 		goto out;
+
+	if (daemonize) {
+		int devnull;
+
+		if (setsid() < 0) {
+			weston_log("fatal: setsid failed: %m\n");
+			goto out;
+		}
+
+		if ((devnull = open("/dev/null", O_RDWR, 0)) != -1) {
+			dup2(devnull, 0);
+			dup2(devnull, 1);
+			if (devnull > 2)
+				close(devnull);
+		}
+
+		ret = EXIT_SUCCESS;
+
+		write(pipefd[1], &ret, sizeof (ret));
+		close(pipefd[1]);
+	}
 
 	weston_compositor_wake(ec);
 
