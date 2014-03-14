@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="wl_hid">
+  <interface name="wl_hid_device" version="1">
+    <request name="destroy" type="destructor"/>
+
+    <!-- Bus type (in descriptor) -->
+    <enum name="bustype">
+      <entry name="other" value="0"/>
+      <entry name="usb" value="1"/>
+      <entry name="pci" value="2"/>
+      <entry name="bluetooth" value="3"/>
+      <entry name="virtual" value="4"/>
+    </enum>
+
+    <!-- Event containing the device description, sent when a new
+         device becomes available. -->
+    <event name="description">
+      <arg name="name" type="string"/>
+      <arg name="serial" type="string"/>
+      <arg name="bus" type="uint"/>
+      <arg name="vid" type="int"/>
+      <arg name="pid" type="int"/>
+      <arg name="version" type="uint"/>
+      <arg name="descriptor" type="array"/>
+      <arg name="physical" type="array"/>
+      <arg name="strings" type="array"/>
+    </event>
+
+    <request name="grab">
+      <arg name="report_id" type="uint"/>
+    </request>
+
+    <request name="release">
+      <arg name="report_id" type="uint"/>
+    </request>
+
+    <!-- Client to device -->
+    <request name="feature">
+      <arg name="report_id" type="int"/>
+      <arg name="report" type="array"/>
+    </request>
+
+    <request name="output">
+      <arg name="report_id" type="int"/>
+      <arg name="report" type="array"/>
+    </request>
+
+    <request name="feature_sollicit">
+      <arg name="report_id" type="int"/>
+    </request>
+
+    <!-- Device to client -->
+    <event name="feature">
+      <arg name="report_id" type="int"/>
+      <arg name="report" type="array"/>
+    </event>
+
+    <event name="input">
+      <arg name="report_id" type="int"/>
+      <arg name="report" type="array"/>
+    </event>
+
+    <!-- Compositor to client -->
+    <event name="dropped"/>
+  </interface>
+
+</protocol>

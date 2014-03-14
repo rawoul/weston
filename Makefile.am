@@ -345,6 +345,16 @@ INPUT_BACKEND_SOURCES =				\
 	libweston/libinput-device.h		\
 	shared/helpers.h
 
+LH_BACKEND_LIBS = $(LIBLH_LIBS)
+LH_BACKEND_CFLAGS = $(LIBLH_CFLAGS)
+LH_BACKEND_SOURCES =				\
+	libweston/ela-wayland.c			\
+	libweston/lh-input.c			\
+	libweston/lh-hid.c
+LH_BACKEND_PROTOCOL_SOURCES =			\
+	protocol/hid-protocol.c			\
+	protocol/hid-server-protocol.h
+
 if ENABLE_DRM_COMPOSITOR
 libweston_module_LTLIBRARIES += drm-backend.la
 drm_backend_la_LDFLAGS = -module -avoid-version
@@ -1478,7 +1488,8 @@ EXTRA_DIST +=					\
 	protocol/weston-test.xml		\
 	protocol/ivi-application.xml		\
 	protocol/ivi-hmi-controller.xml		\
-	protocol/gdl.xml
+	protocol/gdl.xml			\
+	protocol/hid.xml
 
 #
 # manual test modules in tests subdirectory

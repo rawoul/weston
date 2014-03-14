@@ -296,6 +296,10 @@ if test x$need_libinput = xyes; then
   fi
 fi
 
+if test x$need_liblh = xyes; then
+  PKG_CHECK_MODULES(LIBLH, [lh ela fbxevent fbxbus fbxsystem fbxmdnssd])
+fi
+
 AC_ARG_ENABLE([screen-sharing], [  --enable-screen-sharing],,
               enable_screen_sharing=no)
 AM_CONDITIONAL([ENABLE_SCREEN_SHARING],
