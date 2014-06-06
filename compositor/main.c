@@ -483,11 +483,6 @@ static const char xdg_wrong_message[] =
 	"fatal: environment variable XDG_RUNTIME_DIR\n"
 	"is set to \"%s\", which is not a directory.\n";
 
-static const char xdg_wrong_mode_message[] =
-	"warning: XDG_RUNTIME_DIR \"%s\" is not configured\n"
-	"correctly.  Unix access mode must be 0700 (current mode is %o),\n"
-	"and must be owned by the user (current owner is UID %d).\n";
-
 static const char xdg_detail_message[] =
 	"Refer to your distribution on how to get it, or\n"
 	"http://www.freedesktop.org/wiki/Specifications/basedir-spec\n"
@@ -509,12 +504,6 @@ verify_xdg_runtime_dir(void)
 		weston_log(xdg_wrong_message, dir);
 		weston_log_continue(xdg_detail_message);
 		exit(EXIT_FAILURE);
-	}
-
-	if ((s.st_mode & 0777) != 0700 || s.st_uid != getuid()) {
-		weston_log(xdg_wrong_mode_message,
-			   dir, s.st_mode & 0777, s.st_uid);
-		weston_log_continue(xdg_detail_message);
 	}
 }
 
