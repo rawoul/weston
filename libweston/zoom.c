@@ -52,7 +52,6 @@ weston_zoom_frame_z(struct weston_animation *animation,
 		if (output->zoom.active && output->zoom.level <= 0.0) {
 			output->zoom.active = false;
 			output->zoom.seat = NULL;
-			output->disable_planes--;
 			wl_list_remove(&output->zoom.motion_listener.link);
 		}
 		output->zoom.spring_z.current = output->zoom.level;
@@ -155,7 +154,6 @@ weston_output_activate_zoom(struct weston_output *output,
 
 	output->zoom.active = true;
 	output->zoom.seat = seat;
-	output->disable_planes++;
 	wl_signal_add(&pointer->motion_signal,
 		      &output->zoom.motion_listener);
 }
