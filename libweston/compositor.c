@@ -3764,7 +3764,7 @@ weston_subsurface_create(uint32_t id, struct weston_surface *surface,
 			 struct weston_surface *parent)
 {
 	struct weston_subsurface *sub;
-	struct wl_client *client = wl_resource_get_client(surface->resource);
+	struct wl_client *client = wl_resource_get_client(parent->resource);
 
 	sub = zalloc(sizeof *sub);
 	if (sub == NULL)
