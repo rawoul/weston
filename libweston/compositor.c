@@ -3286,6 +3286,9 @@ subsurface_committed(struct weston_surface *surface, int32_t dx, int32_t dy)
 					 view->geometry.x + dx,
 					 view->geometry.y + dy);
 
+	if (surface->width == 0)
+		return;
+
 	/* No need to check parent mappedness, because if parent is not
 	 * mapped, parent is not in a visible layer, so this sub-surface
 	 * will not be drawn either.
