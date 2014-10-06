@@ -1747,7 +1747,12 @@ busy_cursor_grab_focus(struct weston_pointer_grab *base)
 	view = weston_compositor_pick_view(pointer->seat->compositor,
 					   pointer->x, pointer->y,
 					   &sx, &sy);
-	desktop_surface = weston_surface_get_desktop_surface(view->surface);
+
+	desktop_surface = NULL;
+	if (view) {
+		desktop_surface =
+			weston_surface_get_desktop_surface(view->surface);
+	}
 
 	if (!grab->shsurf || grab->shsurf->desktop_surface != desktop_surface) {
 		shell_grab_end(grab);
