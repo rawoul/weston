@@ -960,6 +960,7 @@ struct weston_view {
 	 */
 	struct {
 		int dirty;
+		float alpha;
 
 		/* Approximations in global coordinates:
 		 * - boundingbox is guaranteed to include the whole view in
@@ -1006,6 +1007,7 @@ struct weston_surface_state {
 	struct wl_listener buffer_destroy_listener;
 	int32_t sx;
 	int32_t sy;
+	float alpha;
 
 	/* wl_surface.damage */
 	pixman_region32_t damage_surface;
@@ -1152,6 +1154,9 @@ struct weston_surface {
 
 	/* An list of per seat pointer constraints. */
 	struct wl_list pointer_constraints;
+
+	/* Freebox addition */
+	float alpha;
 };
 
 struct weston_subsurface {
@@ -1484,6 +1489,9 @@ weston_view_set_mask_infinite(struct weston_view *view);
 bool
 weston_view_is_mapped(struct weston_view *view);
 
+float
+weston_view_get_alpha(struct weston_view *view);
+
 void
 weston_view_schedule_repaint(struct weston_view *view);
 
@@ -1493,6 +1501,9 @@ weston_surface_is_mapped(struct weston_surface *surface);
 void
 weston_surface_set_size(struct weston_surface *surface,
 			int32_t width, int32_t height);
+
+void
+weston_surface_set_alpha(struct weston_surface *surface, float alpha);
 
 void
 weston_surface_schedule_repaint(struct weston_surface *surface);

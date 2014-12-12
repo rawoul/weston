@@ -780,7 +780,7 @@ ice_plane_assign_video(struct ice_plane *plane, struct weston_view *view)
 	    cfg.src_rect.width, cfg.src_rect.height,
 	    cfg.src_rect.origin.x, cfg.src_rect.origin.y);
 
-	cfg.alpha = roundf(view->alpha * 255.0f);
+	cfg.alpha = roundf(weston_view_get_alpha(view) * 255.0f);
 
 	if (backend->debug_planes)
 		cfg.tint = ICE_TINT_GREEN;
@@ -1048,7 +1048,7 @@ ice_plane_assign_graphics(struct ice_plane *plane, struct weston_view *view)
 		cfg.scale = 1;
 	}
 
-	cfg.alpha = roundf(view->alpha * 255.0f);
+	cfg.alpha = roundf(weston_view_get_alpha(view) * 255.0f);
 	cfg.color_space = gdl_buffer->color_space;
 	cfg.premul = gdl_pixel_format_has_alpha(cfg.pixel_format);
 
@@ -1260,7 +1260,7 @@ ice_plane_assign_cursor(struct ice_plane *plane,
 		}
 	}
 
-	cfg.alpha = roundf(view->alpha * 255.0f);
+	cfg.alpha = roundf(weston_view_get_alpha(view) * 255.0f);
 
 	cfg.pixel_format = surface_info->pixel_format;
 	cfg.color_space = gdl_surface_get_color_space(surface_info);

@@ -394,6 +394,7 @@ weston_surface_state_init(struct weston_surface_state *state)
 		surface_state_handle_buffer_destroy;
 	state->sx = 0;
 	state->sy = 0;
+	state->alpha = 1.0;
 
 	pixman_region32_init(&state->damage_surface);
 	pixman_region32_init(&state->damage_buffer);
@@ -460,6 +461,7 @@ weston_surface_create(struct weston_compositor *compositor)
 
 	surface->compositor = compositor;
 	surface->ref_count = 1;
+	surface->alpha = 1.0;
 
 	surface->buffer_viewport.buffer.transform = WL_OUTPUT_TRANSFORM_NORMAL;
 	surface->buffer_viewport.buffer.scale = 1;
@@ -1152,7 +1154,7 @@ weston_view_update_transform_disable(struct weston_view *view)
 	pixman_region32_translate(&view->transform.boundingbox,
 				  view->geometry.x, view->geometry.y);
 
-	if (view->alpha == 1.0) {
+	if (weston_view_get_alpha(view) == 1.0) {
 		pixman_region32_copy(&view->transform.opaque,
 				     &view->surface->opaque);
 		pixman_region32_translate(&view->transform.opaque,
@@ -1242,6 +1244,11 @@ weston_view_update_transform(struct weston_view *view)
 	pixman_region32_fini(&view->transform.boundingbox);
 	pixman_region32_fini(&view->transform.opaque);
 	pixman_region32_init(&view->transform.opaque);
+
+	/* inherit alpha from parent */
+	view->transform.alpha = view->surface->alpha * view->alpha;
+	if (parent)
+		view->transform.alpha *= parent->transform.alpha;
 
 	/* transform.position is always in transformation_list */
 	if (view->geometry.transformation_list.next ==
@@ -1557,6 +1564,12 @@ weston_view_set_mask_infinite(struct weston_view *view)
 	weston_view_schedule_repaint(view);
 }
 
+WL_EXPORT float
+weston_view_get_alpha(struct weston_view *view)
+{
+	return view->transform.alpha;
+}
+
 /* Check if view should be displayed
  *
  * The indicator is set manually when assigning
@@ -1609,6 +1622,20 @@ weston_surface_set_size(struct weston_surface *surface,
 {
 	assert(!surface->resource);
 	surface_set_size(surface, width, height);
+}
+
+WL_EXPORT void
+weston_surface_set_alpha(struct weston_surface *surface, float alpha)
+{
+	struct weston_view *view;
+
+	if (surface->alpha == alpha)
+		return;
+
+	surface->alpha = alpha;
+
+	wl_list_for_each(view, &surface->views, surface_link)
+		weston_view_geometry_dirty(view);
 }
 
 static int
@@ -2845,6 +2872,8 @@ weston_surface_commit_state(struct weston_surface *surface,
 		weston_surface_attach(surface, state->buffer);
 	weston_surface_state_set_buffer(state, NULL);
 
+	weston_surface_set_alpha(surface, state->alpha);
+
 	weston_surface_build_buffer_matrix(surface,
 					   &surface->surface_to_buffer_matrix);
 	weston_matrix_invert(&surface->buffer_to_surface_matrix,
@@ -3006,6 +3035,24 @@ surface_set_buffer_scale(struct wl_client *client,
 	surface->pending.buffer_viewport.changed = 1;
 }
 
+static void
+surface_set_alpha(struct wl_client *client,
+		  struct wl_resource *resource,
+		  int32_t alpha)
+{
+	struct weston_surface *surface = wl_resource_get_user_data(resource);
+
+	if (alpha < 0 || alpha > 255) {
+		wl_resource_post_error(resource,
+			WL_SURFACE_ERROR_INVALID_ALPHA,
+			"alpha must be in range 0-255 ('%d' specified)",
+			alpha);
+		return;
+	}
+
+	surface->pending.alpha = alpha / 255.0;
+}
+
 static const struct wl_surface_interface surface_interface = {
 	surface_destroy,
 	surface_attach,
@@ -3016,7 +3063,8 @@ static const struct wl_surface_interface surface_interface = {
 	surface_commit,
 	surface_set_buffer_transform,
 	surface_set_buffer_scale,
-	surface_damage_buffer
+	surface_damage_buffer,
+	surface_set_alpha
 };
 
 static void

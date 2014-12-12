@@ -107,10 +107,13 @@ fill_region(struct weston_view *ev, struct weston_output *output,
 	struct weston_vector p1, p2;
 	pixman_box32_t *rects;
 	int i, nrects;
+	float alpha;
 	srb_fill_info_t fill;
 	gdl_ret_t rc;
 
-	if (ev->alpha < 1.0) {
+	alpha = weston_view_get_alpha(ev);
+
+	if (alpha < 1.0) {
 		fill.blend.flags = SRB_BLEND_ENABLE_BLEND_EQUATION;
 		fill.blend.src_rgb = SRB_BLEND_FUNC_ONE;
 		fill.blend.src_alpha = SRB_BLEND_FUNC_ONE;
@@ -119,13 +122,13 @@ fill_region(struct weston_view *ev, struct weston_output *output,
 	} else
 		fill.blend.flags = 0;
 
-	fill.fill_color = premul_argb_color(ps->color, ev->alpha);
+	fill.fill_color = premul_argb_color(ps->color, alpha);
 	fill.fill_surface_handle = &po->fb->surface;
 
 	matrix = ev->transform.matrix;
 	weston_matrix_multiply(&matrix, &output->matrix);
 
-	dbg("fill color=%08x alpha=%.2f\n", ps->color, ev->alpha);
+	dbg("fill color=%08x alpha=%.2f\n", ps->color, alpha);
 
 	rects = pixman_region32_rectangles(region, &nrects);
 
@@ -177,13 +180,15 @@ blit_region(struct weston_view *ev, struct weston_output *output,
 	struct weston_vector p1, p2;
 	pixman_box32_t *rects, *surf_rects;
 	int i, j, nrects, nsurf;
+	float alpha;
 	srb_blit_info_t blit;
 	gdl_ret_t rc;
 
 	rects = pixman_region32_rectangles(region, &nrects);
 	surf_rects = pixman_region32_rectangles(surf_region, &nsurf);
+	alpha = weston_view_get_alpha(ev);
 
-	if (pixman_op == PIXMAN_OP_OVER || ev->alpha < 1.0) {
+	if (pixman_op == PIXMAN_OP_OVER || alpha < 1.0) {
 		blit.blend.flags = SRB_BLEND_ENABLE_BLEND_EQUATION;
 		blit.blend.src_rgb = SRB_BLEND_FUNC_ONE;
 		blit.blend.src_alpha = SRB_BLEND_FUNC_ONE;
@@ -192,8 +197,8 @@ blit_region(struct weston_view *ev, struct weston_output *output,
 	} else
 		blit.blend.flags = 0;
 
-	if (ev->alpha < 1.0) {
-		uint8_t a = ev->alpha * 0xff;
+	if (alpha < 1.0) {
+		uint8_t a = alpha * 0xff;
 		blit.blend.flags |= SRB_BLEND_ENABLE_SRC_MODULATE;
 		blit.blend.modulation_color =
 			(a << 24) | (a << 16) | (a << 8) | a;
@@ -247,7 +252,7 @@ blit_region(struct weston_view *ev, struct weston_output *output,
 	    blit.src_rect.origin.x, blit.src_rect.origin.y,
 	    blit.dest_rect.width, blit.dest_rect.height,
 	    blit.dest_rect.origin.x, blit.dest_rect.origin.y,
-	    ev->alpha,
+	    alpha,
 	    blit.filter == SRB_FILTER_NEAREST ? "nearest" :
 	    blit.filter == SRB_FILTER_LINEAR ? "linear" : "??");
 
