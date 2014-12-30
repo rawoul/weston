@@ -822,14 +822,14 @@ animate_focus_change(struct desktop_shell *shell, struct workspace *ws,
 		ws->fsurf_front = create_focus_surface(shell->compositor, output);
 		if (ws->fsurf_front == NULL)
 			return;
-		ws->fsurf_front->view->alpha = 0.0;
+		weston_view_set_alpha(ws->fsurf_front->view, 0.0);
 
 		ws->fsurf_back = create_focus_surface(shell->compositor, output);
 		if (ws->fsurf_back == NULL) {
 			focus_surface_destroy(ws->fsurf_front);
 			return;
 		}
-		ws->fsurf_back->view->alpha = 0.0;
+		weston_view_set_alpha(ws->fsurf_back->view, 0.0);
 
 		focus_surface_created = true;
 	} else {
@@ -3291,6 +3291,7 @@ surface_opacity_binding(struct weston_pointer *pointer, uint32_t time,
 			struct weston_pointer_axis_event *event,
 			void *data)
 {
+	float alpha;
 	float step = 0.005;
 	struct shell_surface *shsurf;
 	struct weston_surface *focus = pointer->focus->surface;
@@ -3305,15 +3306,13 @@ surface_opacity_binding(struct weston_pointer *pointer, uint32_t time,
 	if (!shsurf)
 		return;
 
-	shsurf->view->alpha -= event->value * step;
+	alpha = shsurf->view->alpha - event->value * step;
+	if (alpha > 1.0)
+		alpha = 1.0;
+	if (alpha < step)
+		alpha = step;
 
-	if (shsurf->view->alpha > 1.0)
-		shsurf->view->alpha = 1.0;
-	if (shsurf->view->alpha < step)
-		shsurf->view->alpha = step;
-
-	weston_view_geometry_dirty(shsurf->view);
-	weston_surface_damage(surface);
+	weston_view_set_alpha(shsurf->view, alpha);
 }
 
 static void
@@ -3873,8 +3872,7 @@ shell_fade(struct desktop_shell *shell, enum fade_type type)
 		if (!shell->fade.view)
 			return;
 
-		shell->fade.view->alpha = 1.0 - tint;
-		weston_view_update_transform(shell->fade.view);
+		weston_view_set_alpha(shell->fade.view, 1.0 - tint);
 	}
 
 	if (shell->fade.view->output == NULL) {
@@ -3957,9 +3955,6 @@ shell_fade_init(struct desktop_shell *shell)
 	shell->fade.view = shell_fade_create_surface(shell);
 	if (!shell->fade.view)
 		return;
-
-	weston_view_update_transform(shell->fade.view);
-	weston_surface_damage(shell->fade.view->surface);
 
 	loop = wl_display_get_event_loop(shell->compositor->wl_display);
 	shell->fade.startup_timer =
@@ -4255,16 +4250,11 @@ switcher_next(struct switcher *switcher)
 			if (prev == switcher->current)
 				next = view;
 			prev = view;
-			view->alpha = 0.25;
-			weston_view_geometry_dirty(view);
-			weston_surface_damage(view->surface);
+			weston_view_set_alpha(view, 0.25);
 		}
 
-		if (is_black_surface_view(view, NULL)) {
-			view->alpha = 0.25;
-			weston_view_geometry_dirty(view);
-			weston_surface_damage(view->surface);
-		}
+		if (is_black_surface_view(view, NULL))
+			weston_view_set_alpha(view, 0.25);
 	}
 
 	if (next == NULL)
@@ -4278,11 +4268,11 @@ switcher_next(struct switcher *switcher)
 
 	switcher->current = next;
 	wl_list_for_each(view, &next->surface->views, surface_link)
-		view->alpha = 1.0;
+		weston_view_set_alpha(view, 1.0);
 
 	shsurf = get_shell_surface(switcher->current->surface);
 	if (shsurf && weston_desktop_surface_get_fullscreen(shsurf->desktop_surface))
-		shsurf->fullscreen.black_view->alpha = 1.0;
+		weston_view_set_alpha(shsurf->fullscreen.black_view, 1.0);
 }
 
 static void
@@ -4305,8 +4295,7 @@ switcher_destroy(struct switcher *switcher)
 		if (is_focus_view(view))
 			continue;
 
-		view->alpha = 1.0;
-		weston_surface_damage(view->surface);
+		weston_view_set_alpha(view, 1.0);
 	}
 
 	if (switcher->current) {
