@@ -1493,6 +1493,9 @@ float
 weston_view_get_alpha(struct weston_view *view);
 
 void
+weston_view_set_alpha(struct weston_view *view, float alpha);
+
+void
 weston_view_schedule_repaint(struct weston_view *view);
 
 bool

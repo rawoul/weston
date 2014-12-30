@@ -1570,6 +1570,17 @@ weston_view_get_alpha(struct weston_view *view)
 	return view->transform.alpha;
 }
 
+WL_EXPORT void
+weston_view_set_alpha(struct weston_view *view, float alpha)
+{
+	if (view->alpha == alpha)
+		return;
+
+	view->alpha = alpha;
+	weston_view_geometry_dirty(view);
+	weston_surface_damage(view->surface);
+}
+
 /* Check if view should be displayed
  *
  * The indicator is set manually when assigning
