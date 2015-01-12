@@ -24,6 +24,7 @@ struct input_lh_seat {
 	struct wl_listener caps_changed_listener;
 	struct wl_listener keyboard_focus_listener;
 	struct wl_client *focused_client;
+	uint32_t konami_state;
 };
 
 struct input_lh {

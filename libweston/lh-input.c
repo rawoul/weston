@@ -39,6 +39,17 @@
 
 #define SOCKET_NAME	"\0lh_devices.sock"
 
+enum konami_code_state {
+	KONAMI_IDLE,
+	KONAMI_U,
+	KONAMI_UU,
+	KONAMI_UUD,
+	KONAMI_UUDD,
+	KONAMI_UUDDL,
+	KONAMI_UUDDLR,
+	KONAMI_UUDDLRL,
+};
+
 enum wlh_device_usage {
 	WLH_USAGE_KEYBOARD = (1 << 0),
 	WLH_USAGE_POINTER = (1 << 1),
@@ -223,38 +234,82 @@ consumer2event(uint16_t consumer)
 }
 
 static void
+konami_code_feed(struct input_lh_seat *input_seat,
+		 uint32_t time, uint32_t keycode)
+{
+#define KONAMI_NEXT(key, state)					\
+	if (keycode == (key)) {					\
+		input_seat->konami_state = (state);		\
+		return;						\
+	}
+
+#define KONAMI_LAST(key, nkey)					\
+	if (keycode == (key)) {					\
+		notify_key(&input_seat->base, time, (nkey),	\
+			   WL_KEYBOARD_KEY_STATE_PRESSED,	\
+			   STATE_UPDATE_NONE);			\
+		notify_key(&input_seat->base, time, (nkey),	\
+			   WL_KEYBOARD_KEY_STATE_RELEASED,	\
+			   STATE_UPDATE_NONE);			\
+	}
+
+	switch (input_seat->konami_state) {
+	case KONAMI_IDLE:
+		KONAMI_NEXT(KEY_UP, KONAMI_U);
+		break;
+	case KONAMI_U:
+		KONAMI_NEXT(KEY_UP, KONAMI_UU);
+		break;
+	case KONAMI_UU:
+		KONAMI_NEXT(KEY_UP, KONAMI_UU);
+		KONAMI_NEXT(KEY_DOWN, KONAMI_UUD);
+		break;
+	case KONAMI_UUD:
+		KONAMI_NEXT(KEY_DOWN, KONAMI_UUDD);
+		break;
+	case KONAMI_UUDD:
+		KONAMI_NEXT(KEY_LEFT, KONAMI_UUDDL);
+		break;
+	case KONAMI_UUDDL:
+		KONAMI_NEXT(KEY_RIGHT, KONAMI_UUDDLR);
+		break;
+	case KONAMI_UUDDLR:
+		KONAMI_NEXT(KEY_LEFT, KONAMI_UUDDLRL);
+		break;
+	case KONAMI_UUDDLRL:
+		KONAMI_LAST(KEY_RIGHT, 0x21f);
+		break;
+	}
+
+	input_seat->konami_state = KONAMI_IDLE;
+}
+
+static void
 feed_key(struct input_lh_seat *input_seat, uint32_t usage, uint32_t value)
 {
 	struct weston_seat *seat = &input_seat->base;
-	uint32_t time;
-	int code;
+	int code, state;
 
-	time = weston_compositor_get_time();
+	code = 0;
+	state = !!value;
 
 	switch (usage >> 16) {
 	case LHID_UT_KEYBOARD:
-		notify_key(seat, time, hid_keyboard[usage & 0xff], value ?
-			   WL_KEYBOARD_KEY_STATE_PRESSED :
-			   WL_KEYBOARD_KEY_STATE_RELEASED,
-			   STATE_UPDATE_AUTOMATIC);
+		code = hid_keyboard[usage & 0xff];
 		break;
 
 	case LHID_UT_CONSUMER:
 		switch (usage & 0xffff) {
 		case LHID_UT_CONSUMER_VOLUME:
-			if (value != 0)
-				notify_key(seat, time, value > 0 ?
-					   KEY_VOLUMEUP : KEY_VOLUMEDOWN,
-					   WL_KEYBOARD_KEY_STATE_PRESSED,
-					   STATE_UPDATE_AUTOMATIC);
+			if (value != 0) {
+				state = 2;
+				code = value > 0 ?
+					KEY_VOLUMEUP : KEY_VOLUMEDOWN;
+			}
 			break;
 
 		default:
-			if ((code = consumer2event(usage)) != 0)
-				notify_key(seat, time, code, value ?
-					   WL_KEYBOARD_KEY_STATE_PRESSED :
-					   WL_KEYBOARD_KEY_STATE_RELEASED,
-					   STATE_UPDATE_AUTOMATIC);
+			code = consumer2event(usage);
 			break;
 		}
 		break;
@@ -262,29 +317,17 @@ feed_key(struct input_lh_seat *input_seat, uint32_t usage, uint32_t value)
 	case LHID_UT_DESKTOP:
 		switch (usage & 0xffff) {
 		case LHID_UT_DESKTOP_SYSTEM_SLEEP:
-			notify_key(seat, time, KEY_SLEEP, value ?
-				   WL_KEYBOARD_KEY_STATE_PRESSED :
-				   WL_KEYBOARD_KEY_STATE_RELEASED,
-				   STATE_UPDATE_AUTOMATIC);
+			code = KEY_SLEEP;
 			break;
 		case LHID_UT_DESKTOP_SYSTEM_WAKEUP:
-			notify_key(seat, time, KEY_WAKEUP, value ?
-				   WL_KEYBOARD_KEY_STATE_PRESSED :
-				   WL_KEYBOARD_KEY_STATE_RELEASED,
-				   STATE_UPDATE_AUTOMATIC);
+			code = KEY_WAKEUP;
 			break;
 		case LHID_UT_DESKTOP_SYSTEM_APP_MENU:
 		case LHID_UT_DESKTOP_SYSTEM_CONTEXT_MENU:
-			notify_key(seat, time, KEY_F3, value ?
-				   WL_KEYBOARD_KEY_STATE_PRESSED :
-				   WL_KEYBOARD_KEY_STATE_RELEASED,
-				   STATE_UPDATE_AUTOMATIC);
+			code = KEY_F3;
 			break;
 		case LHID_UT_DESKTOP_POWER_DOWN:
-			notify_key(seat, time, KEY_POWER, value ?
-				   WL_KEYBOARD_KEY_STATE_PRESSED :
-				   WL_KEYBOARD_KEY_STATE_RELEASED,
-				   STATE_UPDATE_AUTOMATIC);
+			code = KEY_POWER;
 			break;
 		}
 		break;
@@ -292,13 +335,29 @@ feed_key(struct input_lh_seat *input_seat, uint32_t usage, uint32_t value)
 	case LHID_UT_DEVICE_CONTROLS:
 		switch (usage & 0xffff) {
 		case LHID_UT_DEVICE_CONTROLS_DISCOVER_WIRELESS_CONTROL:
-			notify_key(seat, time, KEY_CONNECT, value ?
-				   WL_KEYBOARD_KEY_STATE_PRESSED :
-				   WL_KEYBOARD_KEY_STATE_RELEASED,
-				   STATE_UPDATE_AUTOMATIC);
+			code = KEY_CONNECT;
 			break;
 		}
 		break;
+	}
+
+	if (code != 0) {
+		uint32_t time = weston_compositor_get_time();
+
+		notify_key(seat, time, code, state ?
+			   WL_KEYBOARD_KEY_STATE_PRESSED :
+			   WL_KEYBOARD_KEY_STATE_RELEASED,
+			   STATE_UPDATE_AUTOMATIC);
+
+		if (state == 2) {
+			state = 0;
+			notify_key(seat, time, code,
+				   WL_KEYBOARD_KEY_STATE_RELEASED,
+				   STATE_UPDATE_AUTOMATIC);
+		}
+
+		if (state == 0)
+			konami_code_feed(input_seat, time, code);
 	}
 }
 
