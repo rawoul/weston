@@ -118,6 +118,7 @@ struct wlh_device {
 	struct wl_list pointer_report_list;
 	int32_t abs_x, abs_y;
 	int32_t rel_x, rel_y;
+	int pointer_grabbed;
 
 	struct lhs_usage_extractor usage_extractor;
 };
@@ -167,6 +168,8 @@ static const unsigned char hid_keyboard[256] = {
 
 static int init_fbxbus(struct input_lh *input);
 static void shutdown_fbxbus(struct input_lh *input);
+
+static void wlh_device_release_pointer(struct wlh_device *device);
 
 static int
 consumer2event(uint16_t consumer)
@@ -535,7 +538,7 @@ wlh_device_remove_usage(struct wlh_device *device, uint32_t usage)
 
 	if (usage & WLH_USAGE_POINTER) {
 		assert(wl_list_empty(&device->pointer_report_list));
-		weston_seat_release_pointer(&device->seat->base);
+		wlh_device_release_pointer(device);
 		device->usage &= ~WLH_USAGE_POINTER;
 	}
 
@@ -652,7 +655,9 @@ wlh_pointer_item_destroy(struct wlh_pointer_item *pi)
 {
 	struct wlh_device *device = pi->report->device;
 
-	lh_item_listener_release(&pi->listener, device->lh_device);
+	if (device->pointer_grabbed)
+		lh_item_listener_release(&pi->listener, device->lh_device);
+
 	lh_item_listener_deinit(&pi->listener);
 	wl_list_remove(&pi->link);
 	free(pi);
@@ -664,10 +669,37 @@ wlh_pointer_report_destroy(struct wlh_pointer_report *pr)
 	struct wlh_device *device = pr->device;
 
 	assert(wl_list_empty(&pr->item_list));
-	lh_report_listener_release(&pr->listener, device->lh_device);
+
+	if (device->pointer_grabbed)
+		lh_report_listener_release(&pr->listener, device->lh_device);
+
 	lh_report_listener_deinit(&pr->listener);
 	wl_list_remove(&pr->link);
 	free(pr);
+}
+
+static void
+wlh_pointer_report_grab(struct wlh_pointer_report *pr)
+{
+	struct wlh_pointer_item *pi;
+
+	wl_list_for_each(pi, &pr->item_list, link)
+		lh_item_listener_grab(&pi->listener, pr->device->lh_device,
+				      pi->item);
+
+	lh_report_listener_grab(&pr->listener, pr->device->lh_device,
+				LHID_REPORT_INPUT, pr->report_id);
+}
+
+static void
+wlh_pointer_report_release(struct wlh_pointer_report *pr)
+{
+	struct wlh_pointer_item *pi;
+
+	lh_report_listener_release(&pr->listener, pr->device->lh_device);
+
+	wl_list_for_each(pi, &pr->item_list, link)
+		lh_item_listener_release(&pi->listener, pr->device->lh_device);
 }
 
 static void
@@ -880,8 +912,6 @@ wlh_device_add_pointer_report(struct wlh_device *device,
 
 		lh_item_listener_init(&pi->listener,
 				      &pointer_item_listener_handler);
-		lh_item_listener_grab(&pi->listener, device->lh_device,
-				      pi->item);
 
 		wl_list_insert(&pr->item_list, &pi->link);
 	}
@@ -895,19 +925,48 @@ wlh_device_add_pointer_report(struct wlh_device *device,
 
 	lh_report_listener_init(&pr->listener,
 				&pointer_report_listener_handler);
-	lh_report_listener_grab(&pr->listener, device->lh_device,
-				LHID_REPORT_INPUT, pr->report_id);
 
 	wl_list_insert(&device->pointer_report_list, &pr->link);
 
 	return 0;
 }
 
-static int
+static void
+wlh_device_grab_pointer(struct wlh_device *device)
+{
+	struct wlh_pointer_report *pr;
+
+	if (device->pointer_grabbed || !(device->usage & WLH_USAGE_POINTER))
+		return;
+
+	wl_list_for_each(pr, &device->pointer_report_list, link)
+		wlh_pointer_report_grab(pr);
+
+	weston_seat_init_pointer(&device->seat->base);
+
+	device->pointer_grabbed = 1;
+}
+
+static void
+wlh_device_release_pointer(struct wlh_device *device)
+{
+	struct wlh_pointer_report *pr;
+
+	if (!device->pointer_grabbed)
+		return;
+
+	wl_list_for_each(pr, &device->pointer_report_list, link)
+		wlh_pointer_report_release(pr);
+
+	weston_seat_release_pointer(&device->seat->base);
+
+	device->pointer_grabbed = 0;
+}
+
+static struct wlh_device *
 register_device(struct input_lh *input, struct input_lh_seat *seat,
 		struct lh_device *lh_device)
 {
-	const struct lh_device_info *info;
 	const struct lhid_descriptor *desc;
 	struct wlh_device *device;
 	size_t i;
@@ -921,8 +980,6 @@ register_device(struct input_lh *input, struct input_lh_seat *seat,
 	device->lh_device = lh_device;
 	device->pending_event = WLH_EVENT_NONE;
 
-	info = lh_device_info_get(lh_device);
-
 	/* register keyboard related reports */
 	if (!lhs_usage_extractor_init(&device->usage_extractor,
 				      &keyboard_ue_handler,
@@ -932,15 +989,12 @@ register_device(struct input_lh *input, struct input_lh_seat *seat,
 	/* register pointer related reports */
 	wl_list_init(&device->pointer_report_list);
 
-	if (info->bus != LH_BUS_RTI) {
-		/* FIXME: never grab remoti pointer for now */
-		desc = lh_device_descriptor_get(device->lh_device);
-		for (i = 0; i < desc->way[LHID_REPORT_INPUT].desc_count; i++) {
-			const struct lhid_report_desc *rd =
-				&desc->way[LHID_REPORT_INPUT].desc[i];
+	desc = lh_device_descriptor_get(device->lh_device);
+	for (i = 0; i < desc->way[LHID_REPORT_INPUT].desc_count; i++) {
+		const struct lhid_report_desc *rd =
+			&desc->way[LHID_REPORT_INPUT].desc[i];
 
-			wlh_device_add_pointer_report(device, rd);
-		}
+		wlh_device_add_pointer_report(device, rd);
 	}
 
 	if (!wl_list_empty(&device->pointer_report_list))
@@ -953,9 +1007,6 @@ register_device(struct input_lh *input, struct input_lh_seat *seat,
 	}
 
 	/* register device in weston */
-	if (device->usage & WLH_USAGE_POINTER)
-		weston_seat_init_pointer(&device->seat->base);
-
 	if (device->usage & WLH_USAGE_KEYBOARD)
 		weston_seat_init_keyboard(&device->seat->base, NULL);
 
