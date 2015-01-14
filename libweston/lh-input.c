@@ -497,7 +497,7 @@ gamepad_handle_motion_timer(struct ela_event_source *source, int fd,
 	notify_motion(&pad->seat->base, weston_compositor_get_time(), &event);
 }
 
-static int
+static struct wlh_gamepad *
 register_gamepad(struct input_lh *input, struct input_lh_seat *seat,
 		 struct lh_device *lh_device)
 {
@@ -506,7 +506,7 @@ register_gamepad(struct input_lh *input, struct input_lh_seat *seat,
 
 	pad = zalloc(sizeof *pad);
 	if (!pad)
-		return -1;
+		return NULL;
 
 	pad->input = input;
 	pad->seat = seat;
@@ -516,7 +516,7 @@ register_gamepad(struct input_lh *input, struct input_lh_seat *seat,
 			     &gamepad_mapping_handler, pad->lh_device,
 			     gamepad_mapping_desc)) {
 		free(pad);
-		return -1;
+		return NULL;
 	}
 
 	ela_source_alloc(input->loop, gamepad_handle_motion_timer,
@@ -528,7 +528,7 @@ register_gamepad(struct input_lh *input, struct input_lh_seat *seat,
 	weston_seat_init_keyboard(&pad->seat->base, NULL);
 	weston_seat_init_pointer(&pad->seat->base);
 
-	return 0;
+	return pad;
 }
 
 static void
@@ -939,12 +939,12 @@ wlh_device_grab_pointer(struct wlh_device *device)
 	if (device->pointer_grabbed || !(device->usage & WLH_USAGE_POINTER))
 		return;
 
+	device->pointer_grabbed = 1;
+
 	wl_list_for_each(pr, &device->pointer_report_list, link)
 		wlh_pointer_report_grab(pr);
 
 	weston_seat_init_pointer(&device->seat->base);
-
-	device->pointer_grabbed = 1;
 }
 
 static void
@@ -955,25 +955,26 @@ wlh_device_release_pointer(struct wlh_device *device)
 	if (!device->pointer_grabbed)
 		return;
 
+	device->pointer_grabbed = 0;
+
 	wl_list_for_each(pr, &device->pointer_report_list, link)
 		wlh_pointer_report_release(pr);
 
 	weston_seat_release_pointer(&device->seat->base);
-
-	device->pointer_grabbed = 0;
 }
 
 static struct wlh_device *
 register_device(struct input_lh *input, struct input_lh_seat *seat,
 		struct lh_device *lh_device)
 {
+	const struct lh_device_info *info;
 	const struct lhid_descriptor *desc;
 	struct wlh_device *device;
 	size_t i;
 
 	device = zalloc(sizeof *device);
 	if (!device)
-		return -1;
+		return NULL;
 
 	device->input = input;
 	device->seat = seat;
@@ -1003,14 +1004,20 @@ register_device(struct input_lh *input, struct input_lh_seat *seat,
 	/* throw out device if it cannot be used for anything useful */
 	if (!device->usage) {
 		free(device);
-		return -1;
+		return NULL;
 	}
 
 	/* register device in weston */
 	if (device->usage & WLH_USAGE_KEYBOARD)
 		weston_seat_init_keyboard(&device->seat->base, NULL);
 
-	return 0;
+	/* only grab remote controller pointer when actually
+	 * needed, to avoid using the battery too much */
+	info = lh_device_info_get(lh_device);
+	if (info->bus != LH_BUS_RTI || input->pointer_enabled)
+		wlh_device_grab_pointer(device);
+
+	return device;
 }
 
 static int
@@ -1054,12 +1061,16 @@ input_lh_device_new(struct input_lh *input, struct lh_device *lh_device)
 	info = lh_device_info_get(lh_device);
 
 	if (device_is_gamepad(lh_device) &&
-	    !register_gamepad(input, &input->seat, lh_device))
+	    (device->wlh_gamepad =
+		     register_gamepad(input, &input->seat, lh_device))) {
 		weston_log("using input device %s as a gamepad\n", info->name);
-	else if (!register_device(input, &input->seat, lh_device))
+
+	} else if ((device->wlh_device =
+		    register_device(input, &input->seat, lh_device))) {
 		weston_log("using input device %s\n", info->name);
-	else
+	} else {
 		weston_log("not using input device %s\n", info->name);
+	}
 
 	return device;
 }
@@ -1316,6 +1327,29 @@ handle_keyboard_focus(struct wl_listener *listener, void *data)
 	 */
 	loop = wl_display_get_event_loop(input->compositor->wl_display);
 	input->regrab_idle = wl_event_loop_add_idle(loop, idle_regrab, input);
+}
+
+void
+input_lh_enable_pointer(struct input_lh *input, int enable)
+{
+	struct input_lh_device *device;
+	const struct lh_device_info *info;
+
+	wl_list_for_each(device, &input->device_list, link) {
+		if (!device->wlh_device)
+			continue;
+
+		info = lh_device_info_get(device->wlh_device->lh_device);
+		if (info->bus != LH_BUS_RTI)
+			continue;
+
+		if (enable)
+			wlh_device_grab_pointer(device->wlh_device);
+		else
+			wlh_device_release_pointer(device->wlh_device);
+	}
+
+	input->pointer_enabled = enable;
 }
 
 struct input_lh_seat *
