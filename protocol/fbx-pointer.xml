@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="fbx_pointer">
+  <interface name="fbx_pointer" version="1">
+    <request name="grab"/>
+    <request name="release"/>
+    <event name="available"/>
+    <event name="unavailable"/>
+  </interface>
+</protocol>

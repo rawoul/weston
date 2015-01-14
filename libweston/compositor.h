@@ -831,6 +831,8 @@ struct weston_compositor {
 
 	void *user_data;
 	void (*exit)(struct weston_compositor *c);
+
+	struct wl_client *input_method_client;
 };
 
 struct weston_buffer {

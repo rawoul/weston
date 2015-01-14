@@ -932,6 +932,8 @@ respawn_input_method_process(struct text_backend *text_backend)
 {
 	uint32_t time;
 
+	text_backend->compositor->input_method_client = NULL;
+
 	/* if input_method dies more than 5 times in 10 seconds, give up */
 	time = weston_compositor_get_time();
 	if (time - text_backend->input_method.deathstamp > 10000) {
@@ -956,6 +958,8 @@ input_method_client_notifier(struct wl_listener *listener, void *data)
 
 	text_backend = container_of(listener, struct text_backend,
 				    client_listener);
+
+	text_backend->compositor->input_method_client = NULL;
 
 	text_backend->input_method.client = NULL;
 	respawn_input_method_process(text_backend);
@@ -983,6 +987,9 @@ launch_input_method(struct text_backend *text_backend)
 	text_backend->client_listener.notify = input_method_client_notifier;
 	wl_client_add_destroy_listener(text_backend->input_method.client,
 				       &text_backend->client_listener);
+
+	text_backend->compositor->input_method_client =
+		text_backend->input_method.client;
 }
 
 static void

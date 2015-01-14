@@ -350,10 +350,13 @@ LH_BACKEND_CFLAGS = $(LIBLH_CFLAGS)
 LH_BACKEND_SOURCES =				\
 	libweston/ela-wayland.c			\
 	libweston/lh-input.c			\
-	libweston/lh-hid.c
+	libweston/lh-hid.c			\
+	libweston/lh-pointer.c
 LH_BACKEND_PROTOCOL_SOURCES =			\
 	protocol/hid-protocol.c			\
-	protocol/hid-server-protocol.h
+	protocol/hid-server-protocol.h		\
+	protocol/fbx-pointer-protocol.c		\
+	protocol/fbx-pointer-server-protocol.h
 
 if ENABLE_DRM_COMPOSITOR
 libweston_module_LTLIBRARIES += drm-backend.la
@@ -1493,7 +1496,8 @@ EXTRA_DIST +=					\
 	protocol/ivi-application.xml		\
 	protocol/ivi-hmi-controller.xml		\
 	protocol/gdl.xml			\
-	protocol/hid.xml
+	protocol/hid.xml			\
+	protocol/fbx-pointer.xml
 
 #
 # manual test modules in tests subdirectory

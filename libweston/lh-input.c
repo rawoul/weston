@@ -1289,6 +1289,10 @@ seat_caps_changed(struct wl_listener *listener, void *data)
 	} else {
 		wl_list_init(&seat->keyboard_focus_listener.link);
 	}
+
+	if (seat->input->fbx_pointer)
+		fbx_pointer_set_available(seat->input->fbx_pointer,
+					  seat->base.pointer_device_count > 0);
 }
 
 static void
@@ -1323,6 +1327,9 @@ idle_regrab(void *data)
 			hid_device_set_grab(device->hid_device,
 					    focused_client, 1);
 		}
+
+		fbx_pointer_set_focused_client(input->fbx_pointer,
+					       focused_client);
 
 		seat->focused_client = focused_client;
 	}
@@ -1435,6 +1442,8 @@ input_lh_init(struct input_lh *input, struct weston_compositor *c)
 
 	lh_global_listener_add(&input->listener, &global_handler, &input->lh);
 
+	input->fbx_pointer = fbx_pointer_init(input);
+
 	enumerate_kernel_devices(input);
 	enumerate_user_devices(input);
 	enumerate_network_devices(input);
@@ -1458,6 +1467,9 @@ input_lh_shutdown(struct input_lh *input)
 			  "name_lost");
 
 	set_network_name(input, NULL);
+
+	fbx_pointer_destroy(input->fbx_pointer);
+	input->fbx_pointer = NULL;
 
 	lh_deinit(&input->lh);
 	ela_close(input->loop);

@@ -11,6 +11,7 @@ struct fbxbus_ctx;
 struct hid_device;
 struct wlh_device;
 struct wlh_gamepad;
+struct fbx_pointer_context;
 
 struct input_lh_device {
 	struct input_lh *input;
@@ -45,6 +46,7 @@ struct input_lh {
 	struct wl_list device_list;
 	struct wl_event_source *regrab_idle;
 	int pointer_enabled;
+	struct fbx_pointer_context *fbx_pointer;
 };
 
 int input_lh_init(struct input_lh *input, struct weston_compositor *c);
@@ -57,5 +59,11 @@ struct hid_device *hid_device_new(struct input_lh *input,
 void hid_device_set_grab(struct hid_device *hid_device,
 			 struct wl_client *client, int grab);
 void hid_device_destroy(struct hid_device *hid_device);
+
+struct fbx_pointer_context *fbx_pointer_init(struct input_lh *input);
+void fbx_pointer_destroy(struct fbx_pointer_context *fp);
+void fbx_pointer_set_available(struct fbx_pointer_context *fp, int available);
+void fbx_pointer_set_focused_client(struct fbx_pointer_context *fp,
+				    struct wl_client *focused_client);
 
 #endif
