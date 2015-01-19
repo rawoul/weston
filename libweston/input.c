@@ -3393,6 +3393,16 @@ maybe_enable_pointer_constraint(struct weston_pointer_constraint *constraint)
 static void
 locked_pointer_grab_pointer_focus(struct weston_pointer_grab *grab)
 {
+	struct weston_pointer_constraint *constraint =
+		container_of(grab, struct weston_pointer_constraint, grab);
+	wl_fixed_t sx, sy;
+
+	weston_view_from_global_fixed(constraint->view,
+				      grab->pointer->x,
+				      grab->pointer->y,
+				      &sx, &sy);
+
+	weston_pointer_set_focus(grab->pointer, constraint->view, sx, sy);
 }
 
 static void
