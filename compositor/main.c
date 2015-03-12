@@ -1783,6 +1783,8 @@ int main(int argc, char *argv[])
 		close(pipefd[0]);
 	}
 
+	umask(002);
+
 	display = wl_display_create();
 
 	loop = wl_display_get_event_loop(display);
