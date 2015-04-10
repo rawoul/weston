@@ -437,11 +437,30 @@ static void mapping_value_changed(struct lhs_mapping *mapping,
 			break;
 
 		case WLH_GAMEPAD_OK:
-			notify_button(&pad->seat->base, 0,
-				      BTN_LEFT, value ?
-				      WL_POINTER_BUTTON_STATE_PRESSED :
-				      WL_POINTER_BUTTON_STATE_RELEASED);
-			break;
+			/* use OK as pointer click, if pointer is grabbed */
+			if (pad->input->pointer_enabled) {
+				if (pad->ok_pressed) {
+					feed_key(pad->seat, old_value, 0);
+					pad->ok_pressed = false;
+				}
+
+				notify_button(&pad->seat->base, 0,
+					      BTN_LEFT, value ?
+					      WL_POINTER_BUTTON_STATE_PRESSED :
+					      WL_POINTER_BUTTON_STATE_RELEASED);
+
+				pad->click_pressed = true;
+				break;
+			}
+
+			if (pad->ok_pressed) {
+				notify_button(&pad->seat->base, 0, BTN_LEFT,
+					      WL_POINTER_BUTTON_STATE_RELEASED);
+				pad->ok_pressed = false;
+			}
+
+			pad->ok_pressed = true;
+			/* fallthrough */
 
 		default:
 			/* Synthetize release */
