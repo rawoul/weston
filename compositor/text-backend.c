@@ -57,6 +57,10 @@ struct text_input {
 
 	bool input_panel_visible;
 
+	struct {
+		bool visible;
+	} input_panel_state;
+
 	struct text_input_manager *manager;
 };
 
@@ -122,6 +126,39 @@ static void
 input_method_init_seat(struct weston_seat *seat);
 
 static void
+text_input_send_input_panel_state(struct text_input *text_input)
+{
+	zwp_text_input_v1_send_input_panel_state(text_input->resource,
+			text_input->input_panel_state.visible);
+}
+
+static void
+text_input_update_input_panel_visibility(struct text_input *text_input)
+{
+	struct weston_compositor *ec = text_input->ec;
+	bool visible;
+
+	visible = text_input->input_panel_visible &&
+		text_input->manager->current_panel == text_input;
+
+	if (visible == text_input->input_panel_state.visible)
+		return;
+
+	text_input->input_panel_state.visible = visible;
+
+	if (visible) {
+		wl_signal_emit(&ec->show_input_panel_signal,
+			       text_input->surface);
+		wl_signal_emit(&ec->update_input_panel_signal,
+			       &text_input->cursor_rectangle);
+	} else {
+		wl_signal_emit(&ec->hide_input_panel_signal, ec);
+	}
+
+	text_input_send_input_panel_state(text_input);
+}
+
+static void
 deactivate_input_method(struct input_method *input_method)
 {
 	struct text_input *text_input = input_method->input;
@@ -138,11 +175,9 @@ deactivate_input_method(struct input_method *input_method)
 	input_method->input = NULL;
 	input_method->context = NULL;
 
-	if (wl_list_empty(&text_input->input_methods) &&
-	    text_input->input_panel_visible) {
-		wl_signal_emit(&ec->hide_input_panel_signal, ec);
-		text_input->input_panel_visible = false;
+	if (wl_list_empty(&text_input->input_methods)) {
 		text_input->manager->current_panel = NULL;
+		text_input_update_input_panel_visibility(text_input);
 	}
 	zwp_text_input_v1_send_leave(text_input->resource);
 }
@@ -208,18 +243,12 @@ text_input_activate(struct wl_client *client,
 	current = text_input->manager->current_panel;
 
 	if (current && current != text_input) {
-		current->input_panel_visible = false;
-		wl_signal_emit(&ec->hide_input_panel_signal, ec);
 		text_input->manager->current_panel = NULL;
+		text_input_update_input_panel_visibility(current);
 	}
 
-	if (text_input->input_panel_visible) {
-		wl_signal_emit(&ec->show_input_panel_signal,
-			       text_input->surface);
-		wl_signal_emit(&ec->update_input_panel_signal,
-			       &text_input->cursor_rectangle);
-		text_input->manager->current_panel = text_input;
-	}
+	text_input->manager->current_panel = text_input;
+	text_input_update_input_panel_visibility(text_input);
 
 	zwp_text_input_v1_send_enter(text_input->resource,
 				     text_input->surface->resource);
@@ -330,16 +359,14 @@ text_input_show_input_panel(struct wl_client *client,
 			    struct wl_resource *resource)
 {
 	struct text_input *text_input = wl_resource_get_user_data(resource);
-	struct weston_compositor *ec = text_input->ec;
+
+	if (text_input->input_panel_visible)
+		return;
 
 	text_input->input_panel_visible = true;
 
-	if (!wl_list_empty(&text_input->input_methods)) {
-		wl_signal_emit(&ec->show_input_panel_signal,
-			       text_input->surface);
-		wl_signal_emit(&ec->update_input_panel_signal,
-			       &text_input->cursor_rectangle);
-	}
+	if (!wl_list_empty(&text_input->input_methods))
+		text_input_update_input_panel_visibility(text_input);
 }
 
 static void
@@ -347,15 +374,14 @@ text_input_hide_input_panel(struct wl_client *client,
 			    struct wl_resource *resource)
 {
 	struct text_input *text_input = wl_resource_get_user_data(resource);
-	struct weston_compositor *ec = text_input->ec;
+
+	if (!text_input->input_panel_visible)
+		return;
 
 	text_input->input_panel_visible = false;
 
-	if (!wl_list_empty(&text_input->input_methods) &&
-	    text_input == text_input->manager->current_panel) {
-		text_input->manager->current_panel = NULL;
-		wl_signal_emit(&ec->hide_input_panel_signal, ec);
-	}
+	if (!wl_list_empty(&text_input->input_methods))
+		text_input_update_input_panel_visibility(text_input);
 }
 
 static void
