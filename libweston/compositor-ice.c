@@ -222,13 +222,19 @@ ice_fb_init(struct ice_output *output, struct ice_framebuffer *fb,
 	gdl_ret_t rc;
 	gdl_uint8 *map;
 
-	rc = gdl_alloc_surface(GDL_PF_ARGB_32, width, height, 0,
-			       &fb->surface_info);
+	/* use a fixed 1920x1080 fb size to avoid fragmentation */
+	rc = gdl_alloc_surface(GDL_PF_ARGB_32,
+			       MAX(width, 1920),
+			       MAX(height, 1080),
+			       0, &fb->surface_info);
 	if (rc != GDL_SUCCESS) {
 		weston_log("failed to allocate %ux%u surface: %s\n",
 			   width, height, gdl_get_error_string(rc));
 		return -1;
 	}
+
+	fb->surface_info.width = width;
+	fb->surface_info.height = height;
 
 	rc = gdl_map_surface(fb->surface_info.id, &map, NULL);
 	if (rc != GDL_SUCCESS) {
