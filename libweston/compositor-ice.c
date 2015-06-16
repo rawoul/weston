@@ -1696,12 +1696,9 @@ ice_output_assign_plane(struct ice_output *output, struct weston_view *view,
 	pixman_region32_intersect(&overlap, composited_region,
 				  &view->transform.boundingbox);
 
-	plane = NULL;
-
-	if (pixman_region32_not_empty(&overlap))
+	plane = ice_output_assign_sideband_view(output, view);
+	if (plane == NULL && pixman_region32_not_empty(&overlap))
 		plane = primary;
-	if (plane == NULL)
-		plane = ice_output_assign_sideband_view(output, view);
 	if (plane == NULL)
 		plane = ice_output_assign_graphics_view(output, view);
 	if (plane == NULL)
