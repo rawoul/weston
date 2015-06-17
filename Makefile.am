@@ -679,7 +679,9 @@ nodist_libtoytoolkit_la_SOURCES =			\
 	protocol/pointer-constraints-unstable-v1-protocol.c		\
 	protocol/pointer-constraints-unstable-v1-client-protocol.h	\
 	protocol/relative-pointer-unstable-v1-protocol.c		\
-	protocol/relative-pointer-unstable-v1-client-protocol.h
+	protocol/relative-pointer-unstable-v1-client-protocol.h		\
+	protocol/fbx-pointer-protocol.c			\
+	protocol/fbx-pointer-client-protocol.h
 
 BUILT_SOURCES += $(nodist_libtoytoolkit_la_SOURCES)
 

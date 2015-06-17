@@ -76,6 +76,7 @@ typedef void *EGLContext;
 #include "text-cursor-position-client-protocol.h"
 #include "pointer-constraints-unstable-v1-client-protocol.h"
 #include "relative-pointer-unstable-v1-client-protocol.h"
+#include "fbx-pointer-client-protocol.h"
 #include "shared/os-compatibility.h"
 
 #include "window.h"
@@ -108,6 +109,7 @@ struct display {
 	struct ivi_application *ivi_application; /* ivi style shell */
 	struct zwp_relative_pointer_manager_v1 *relative_pointer_manager;
 	struct zwp_pointer_constraints_v1 *pointer_constraints;
+	struct fbx_pointer *fbx_pointer;
 	EGLDisplay dpy;
 	EGLConfig argb_config;
 	EGLContext argb_ctx;
@@ -147,6 +149,8 @@ struct display {
 
 	int has_rgb565;
 	int data_device_manager_version;
+
+	int grab_pointer;
 };
 
 struct window_output {
@@ -5885,6 +5889,27 @@ display_add_input(struct display *d, uint32_t id, int display_seat_version)
 }
 
 static void
+display_update_pointer_grab(struct display *d)
+{
+	if (!d->fbx_pointer)
+		return;
+
+	if (d->grab_pointer)
+		fbx_pointer_grab(d->fbx_pointer);
+	else
+		fbx_pointer_release(d->fbx_pointer);
+}
+
+void
+display_grab_pointer(struct display *d, int grab)
+{
+	if (grab != d->grab_pointer) {
+		d->grab_pointer = grab;
+		display_update_pointer_grab(d);
+	}
+}
+
+static void
 input_destroy(struct input *input)
 {
 	input_remove_keyboard_focus(input);
@@ -6010,6 +6035,11 @@ registry_handle_global(void *data, struct wl_registry *registry, uint32_t id,
 		d->ivi_application =
 			wl_registry_bind(registry, id,
 					 &ivi_application_interface, 1);
+	}
+	else if (strcmp(interface, "fbx_pointer") == 0) {
+		d->fbx_pointer = wl_registry_bind(registry, id,
+						  &fbx_pointer_interface, 1);
+		display_update_pointer_grab(d);
 	}
 
 	if (d->global_handler)

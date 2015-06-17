@@ -915,6 +915,8 @@ input_method_activate(void *data,
 						   layout->text_direction);
 
 	widget_schedule_redraw(keyboard->keyboard->widget);
+
+	display_grab_pointer(keyboard->display, 1);
 }
 
 static void
@@ -929,6 +931,8 @@ input_method_deactivate(void *data,
 
 	zwp_input_method_context_v1_destroy(keyboard->context);
 	keyboard->context = NULL;
+
+	display_grab_pointer(keyboard->display, 0);
 }
 
 static const struct zwp_input_method_v1_listener input_method_listener = {
