@@ -1047,6 +1047,7 @@ weston_pointer_create(struct weston_seat *seat)
 	wl_signal_init(&pointer->motion_signal);
 	wl_signal_init(&pointer->focus_signal);
 	wl_list_init(&pointer->focus_view_listener.link);
+	wl_signal_init(&pointer->cursor_signal);
 	wl_signal_init(&pointer->destroy_signal);
 
 	pointer->sprite_destroy_listener.notify = pointer_handle_sprite_destroy;
@@ -2342,6 +2343,8 @@ pointer_set_cursor(struct wl_client *client, struct wl_resource *resource,
 		weston_surface_set_label_func(surface,
 					    pointer_cursor_surface_get_label);
 		pointer->sprite = weston_view_create(surface);
+
+		wl_signal_emit(&pointer->cursor_signal, pointer);
 	}
 
 	pointer->hotspot_x = x;
