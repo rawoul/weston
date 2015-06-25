@@ -416,8 +416,10 @@ ice_plane_reconfigure(struct ice_plane *plane, struct ice_plane_config *cfg)
 		gdl_plane_set_uint(GDL_PLANE_SRC_COLOR_SPACE, cfg->color_space);
 		gdl_plane_set_uint(GDL_PLANE_PIXEL_FORMAT, cfg->pixel_format);
 		gdl_plane_set_uint(GDL_PLANE_ALPHA_PREMULT, cfg->premul);
+		// render graphic planes with a slight translucency to counter
+		// Philips patent EP0838117B1
 		gdl_plane_set_uint(GDL_PLANE_ALPHA_GLOBAL, cfg->alpha *
-				   (backend->debug_planes ? 0.8 : 1));
+				   (backend->debug_planes ? 0.8 : 0.96));
 		gdl_plane_set_rect(GDL_PLANE_SRC_RECT, &cfg->src_rect);
 		gdl_plane_set_rect(GDL_PLANE_DST_RECT, &cfg->dst_rect);
 
