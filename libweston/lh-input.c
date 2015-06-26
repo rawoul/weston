@@ -1079,17 +1079,21 @@ input_lh_device_new(struct input_lh *input, struct lh_device *lh_device)
 
 	info = lh_device_info_get(lh_device);
 
-	if (device_is_gamepad(lh_device) &&
-	    (device->wlh_gamepad =
-		     register_gamepad(input, &input->seat, lh_device))) {
-		weston_log("using input device %s as a gamepad\n", info->name);
-
-	} else if ((device->wlh_device =
-		    register_device(input, &input->seat, lh_device))) {
-		weston_log("using input device %s\n", info->name);
+	if (device_is_gamepad(lh_device)) {
+		if (input->gamepad_enabled)
+			device->wlh_gamepad = register_gamepad(input,
+							       &input->seat,
+							       lh_device);
 	} else {
-		weston_log("not using input device %s\n", info->name);
+		device->wlh_device = register_device(input, &input->seat,
+						     lh_device);
 	}
+
+	if (device->wlh_gamepad)
+		weston_log("mapped gamepad %s\n", info->name);
+
+	if (device->wlh_device)
+		weston_log("using input device %s\n", info->name);
 
 	return device;
 }
@@ -1331,6 +1335,9 @@ idle_regrab(void *data)
 		fbx_pointer_set_focused_client(input->fbx_pointer,
 					       focused_client);
 
+		fbx_gamepad_set_focused_client(input->fbx_gamepad,
+					       focused_client);
+
 		seat->focused_client = focused_client;
 	}
 }
@@ -1376,6 +1383,29 @@ input_lh_enable_pointer(struct input_lh *input, int enable)
 	}
 
 	input->pointer_enabled = enable;
+}
+
+void
+input_lh_enable_gamepad(struct input_lh *input, int enable)
+{
+	struct input_lh_device *device;
+
+	wl_list_for_each(device, &input->device_list, link) {
+		if (!enable) {
+			if (device->wlh_gamepad) {
+				wlh_gamepad_destroy(device->wlh_gamepad);
+				device->wlh_gamepad = NULL;
+			}
+		} else {
+			if (!device->wlh_device && !device->wlh_gamepad &&
+			    device_is_gamepad(device->lh_device))
+				device->wlh_gamepad =
+					register_gamepad(input, &input->seat,
+							 device->lh_device);
+		}
+	}
+
+	input->gamepad_enabled = enable;
 }
 
 struct input_lh_seat *
@@ -1443,6 +1473,7 @@ input_lh_init(struct input_lh *input, struct weston_compositor *c)
 	lh_global_listener_add(&input->listener, &global_handler, &input->lh);
 
 	input->fbx_pointer = fbx_pointer_init(input);
+	input->fbx_gamepad = fbx_gamepad_init(input);
 
 	enumerate_kernel_devices(input);
 	enumerate_user_devices(input);
@@ -1470,6 +1501,10 @@ input_lh_shutdown(struct input_lh *input)
 
 	fbx_pointer_destroy(input->fbx_pointer);
 	input->fbx_pointer = NULL;
+
+
+	fbx_gamepad_destroy(input->fbx_gamepad);
+	input->fbx_gamepad = NULL;
 
 	lh_deinit(&input->lh);
 	ela_close(input->loop);

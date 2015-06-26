@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="fbx_gamepad">
+  <interface name="fbx_gamepad" version="1">
+    <request name="grab"/>
+    <request name="release"/>
+  </interface>
+</protocol>
