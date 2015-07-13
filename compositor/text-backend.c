@@ -679,6 +679,16 @@ static const struct weston_keyboard_grab_interface input_method_context_grab = {
 };
 
 static void
+keyboard_release(struct wl_client *client, struct wl_resource *resource)
+{
+	wl_resource_destroy(resource);
+}
+
+static const struct wl_keyboard_interface keyboard_interface = {
+	keyboard_release
+};
+
+static void
 input_method_context_grab_keyboard(struct wl_client *client,
 				   struct wl_resource *resource,
 				   uint32_t id)
@@ -689,8 +699,9 @@ input_method_context_grab_keyboard(struct wl_client *client,
 	struct weston_seat *seat = context->input_method->seat;
 	struct weston_keyboard *keyboard = weston_seat_get_keyboard(seat);
 
-	cr = wl_resource_create(client, &wl_keyboard_interface, 1, id);
-	wl_resource_set_implementation(cr, NULL, context, unbind_keyboard);
+	cr = wl_resource_create(client, &wl_keyboard_interface, 3, id);
+	wl_resource_set_implementation(cr, &keyboard_interface,
+				       context, unbind_keyboard);
 
 	context->keyboard = cr;
 
