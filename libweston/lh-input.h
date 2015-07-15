@@ -12,6 +12,7 @@ struct hid_device;
 struct wlh_device;
 struct wlh_gamepad;
 struct fbx_pointer_context;
+struct fbx_text_context;
 struct fbx_gamepad_context;
 
 struct input_lh_device {
@@ -50,6 +51,7 @@ struct input_lh {
 	int gamepad_enabled;
 	struct fbx_pointer_context *fbx_pointer;
 	struct fbx_gamepad_context *fbx_gamepad;
+	struct fbx_text_context *fbx_text;
 };
 
 int input_lh_init(struct input_lh *input, struct weston_compositor *c);
@@ -69,6 +71,12 @@ void fbx_pointer_destroy(struct fbx_pointer_context *fp);
 void fbx_pointer_set_available(struct fbx_pointer_context *fp, int available);
 void fbx_pointer_set_focused_client(struct fbx_pointer_context *fp,
 				    struct wl_client *focused_client);
+
+struct fbx_text_context *fbx_text_init(struct input_lh *input);
+void fbx_text_destroy(struct fbx_text_context *ft);
+void fbx_text_inject(struct fbx_text_context *ft, int code);
+void fbx_text_set_focused_client(struct fbx_text_context *ft,
+				struct wl_client *focused_client);
 
 struct fbx_gamepad_context *fbx_gamepad_init(struct input_lh *input);
 void fbx_gamepad_destroy(struct fbx_gamepad_context *fp);

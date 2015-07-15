@@ -352,12 +352,15 @@ LH_BACKEND_SOURCES =				\
 	libweston/lh-input.c			\
 	libweston/lh-hid.c			\
 	libweston/lh-pointer.c			\
+	libweston/lh-text.c			\
 	libweston/lh-gamepad.c
 LH_BACKEND_PROTOCOL_SOURCES =			\
 	protocol/hid-protocol.c			\
 	protocol/hid-server-protocol.h		\
 	protocol/fbx-pointer-protocol.c		\
 	protocol/fbx-pointer-server-protocol.h	\
+	protocol/fbx-text-protocol.c		\
+	protocol/fbx-text-server-protocol.h	\
 	protocol/fbx-gamepad-protocol.c		\
 	protocol/fbx-gamepad-server-protocol.h
 
@@ -1501,6 +1504,7 @@ EXTRA_DIST +=					\
 	protocol/gdl.xml			\
 	protocol/hid.xml			\
 	protocol/fbx-pointer.xml		\
+	protocol/fbx-text.xml			\
 	protocol/fbx-gamepad.xml
 
 #

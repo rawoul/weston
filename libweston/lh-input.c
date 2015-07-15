@@ -297,6 +297,11 @@ feed_key(struct input_lh_seat *input_seat, uint32_t usage, uint32_t value)
 	state = !!value;
 
 	switch (usage >> 16) {
+	case LHID_UT_UNICODE:
+		if (input_seat->input->fbx_text)
+			fbx_text_inject(input_seat->input->fbx_text, value);
+		return;
+
 	case LHID_UT_KEYBOARD:
 		code = hid_keyboard[usage & 0xff];
 		break;
@@ -636,6 +641,7 @@ keyboard_item_is_acceptable(struct lhs_usage_extractor *ue,
 	switch (item->usage >> 16) {
 	case LHID_UT_KEYBOARD:
 	case LHID_UT_CONSUMER:
+	case LHID_UT_UNICODE:
 	case LHID_UT_DEVICE_CONTROLS:
 		return 1;
 
@@ -1335,6 +1341,9 @@ idle_regrab(void *data)
 		fbx_pointer_set_focused_client(input->fbx_pointer,
 					       focused_client);
 
+		fbx_text_set_focused_client(input->fbx_text,
+					focused_client);
+
 		fbx_gamepad_set_focused_client(input->fbx_gamepad,
 					       focused_client);
 
@@ -1473,6 +1482,7 @@ input_lh_init(struct input_lh *input, struct weston_compositor *c)
 	lh_global_listener_add(&input->listener, &global_handler, &input->lh);
 
 	input->fbx_pointer = fbx_pointer_init(input);
+	input->fbx_text = fbx_text_init(input);
 	input->fbx_gamepad = fbx_gamepad_init(input);
 
 	enumerate_kernel_devices(input);
@@ -1505,6 +1515,9 @@ input_lh_shutdown(struct input_lh *input)
 
 	fbx_gamepad_destroy(input->fbx_gamepad);
 	input->fbx_gamepad = NULL;
+
+	fbx_text_destroy(input->fbx_text);
+	input->fbx_text = NULL;
 
 	lh_deinit(&input->lh);
 	ela_close(input->loop);

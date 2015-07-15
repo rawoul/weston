@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="fbx_text">
+  <interface name="fbx_text" version="1">
+    <event name="unicode">
+      <arg name="time" type="uint" summary="timestamp with millisecond granularity"/>
+      <arg name="character" type="int"/>
+    </event>
+  </interface>
+</protocol>
