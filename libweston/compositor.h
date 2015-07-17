@@ -578,6 +578,7 @@ struct weston_keyboard {
 
 	struct weston_keyboard_grab input_method_grab;
 	struct wl_resource *input_method_resource;
+	struct wl_array input_method_keys;
 
 	struct weston_xkb_info *xkb_info;
 	struct {

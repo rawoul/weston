@@ -1134,6 +1134,7 @@ weston_keyboard_destroy(struct weston_keyboard *keyboard)
 #endif
 
 	wl_array_release(&keyboard->keys);
+	wl_array_release(&keyboard->input_method_keys);
 	wl_list_remove(&keyboard->focus_resource_listener.link);
 	free(keyboard);
 }

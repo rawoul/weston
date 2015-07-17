@@ -635,11 +635,24 @@ input_method_context_grab_key(struct weston_keyboard_grab *grab,
 			      uint32_t time, uint32_t key, uint32_t state_w)
 {
 	struct weston_keyboard *keyboard = grab->keyboard;
+	struct wl_array *keys = &keyboard->input_method_keys;
 	struct wl_display *display;
 	uint32_t serial;
+	uint32_t *k, *end;
 
 	if (!keyboard->input_method_resource)
 		return;
+
+	end = keys->data + keys->size;
+	for (k = keys->data; k < end; k++) {
+		if (*k == key && state_w == WL_KEYBOARD_KEY_STATE_RELEASED) {
+			keyboard->default_grab.interface->key(grab, time, key,
+							      state_w);
+			*k = *--end;
+			keys->size = (void *) end - keys->data;
+			return;
+		}
+	}
 
 	display = wl_client_get_display(
 		wl_resource_get_client(keyboard->input_method_resource));
@@ -704,6 +717,7 @@ input_method_context_grab_keyboard(struct wl_client *client,
 				       context, unbind_keyboard);
 
 	context->keyboard = cr;
+	wl_array_copy(&keyboard->input_method_keys, &keyboard->keys);
 
 	wl_keyboard_send_keymap(cr, WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1,
 				keyboard->xkb_info->keymap_fd,
