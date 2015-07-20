@@ -1973,6 +1973,7 @@ notify_key(struct weston_seat *seat, uint32_t time, uint32_t key,
 	struct weston_keyboard *keyboard = weston_seat_get_keyboard(seat);
 	struct weston_keyboard_grab *grab = keyboard->grab;
 	uint32_t *k, *end;
+	bool was_pressed = false;
 
 	if (state == WL_KEYBOARD_KEY_STATE_PRESSED) {
 		weston_compositor_idle_inhibit(compositor);
@@ -1987,12 +1988,17 @@ notify_key(struct weston_seat *seat, uint32_t time, uint32_t key,
 			if (state == WL_KEYBOARD_KEY_STATE_PRESSED)
 				return;
 			*k = *--end;
+			was_pressed = true;
 		}
 	}
+
 	keyboard->keys.size = (void *) end - keyboard->keys.data;
 	if (state == WL_KEYBOARD_KEY_STATE_PRESSED) {
 		k = wl_array_add(&keyboard->keys, sizeof *k);
 		*k = key;
+	} else if (!was_pressed) {
+		/* Ignore orphan release */
+		return;
 	}
 
 	if (grab == &keyboard->default_grab ||
