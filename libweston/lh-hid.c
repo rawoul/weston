@@ -5,6 +5,7 @@
 #include <lh/device.h>
 #include <lh/listener.h>
 #include <lh/hid/report.h>
+#include <lh/hid/descriptor_walker.h>
 
 #include <wayland-server.h>
 
@@ -33,6 +34,7 @@ struct hid_grab {
 	struct wl_list link;
 	int grab_count;
 	uint8_t report_id;
+	const struct lhid_report *last_abs_report;
 };
 
 static void
@@ -40,6 +42,11 @@ hid_grab_release(struct hid_grab *hid_grab)
 {
 	if (--hid_grab->grab_count > 0)
 		return;
+
+	if (hid_grab->last_abs_report) {
+		lh_report_refdrop(hid_grab->last_abs_report);
+		hid_grab->last_abs_report = NULL;
+	}
 
 	lh_report_listener_release(&hid_grab->listener,
 				   hid_grab->binding->device->lh_device);
@@ -67,6 +74,30 @@ hid_grab_destroy(struct hid_grab *hid_grab)
 	free(hid_grab);
 }
 
+static bool
+report_is_absolute(struct hid_device *device, const struct lhid_report *report)
+{
+	const struct lhid_descriptor *desc =
+		lh_device_descriptor_get(device->lh_device);
+	unsigned i, j;
+
+	for (i = 0; i < desc->way[LHID_REPORT_INPUT].desc_count; i++) {
+		const struct lhid_report_desc *rd =
+			&desc->way[LHID_REPORT_INPUT].desc[i];
+
+		if (rd->id != report->id)
+			continue;
+
+		for (j = 0; j < rd->item_count; j++)
+			if (!lhid_item_is_absolute(rd->item[j].flags))
+				return false;
+
+		return true;
+	}
+
+	return false;
+}
+
 static void
 hid_grab_report_input(struct lh_report_listener *listener,
 		      const struct lhid_report *report)
@@ -80,10 +111,28 @@ hid_grab_report_input(struct lh_report_listener *listener,
 		.alloc = report->size,
 	};
 
-	if (listener->way == LHID_REPORT_INPUT)
+	if (listener->way == LHID_REPORT_INPUT) {
+		const struct lhid_report *last_report =
+			hid_grab->last_abs_report;
+
+
+		if (last_report && last_report->size == report->size &&
+		    !memcmp(last_report->data, report->data, report->size))
+			return;
+
+		if (hid_grab->last_abs_report) {
+			lh_report_refdrop(hid_grab->last_abs_report);
+			hid_grab->last_abs_report = NULL;
+		}
+
+		if (report_is_absolute(hid_grab->binding->device, report)) {
+			lh_report_refinc(report);
+			hid_grab->last_abs_report = report;
+		}
+
 		wl_hid_device_send_input(hid_grab->binding->resource,
 					 report->id, &data);
-	else
+	} else
 		wl_hid_device_send_feature(hid_grab->binding->resource,
 					   report->id, &data);
 }
