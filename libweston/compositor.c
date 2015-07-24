@@ -5111,6 +5111,29 @@ weston_compositor_set_default_pointer_grab(struct weston_compositor *ec,
 	}
 }
 
+WL_EXPORT void
+weston_compositor_set_keyboard_repeat_info(struct weston_compositor *ec,
+					   int rate, int delay)
+{
+	struct weston_seat *seat;
+	struct weston_keyboard *keyboard;
+	struct wl_resource *cr;
+
+	ec->kb_repeat_rate = rate;
+	ec->kb_repeat_delay = delay;
+
+	wl_list_for_each(seat, &ec->seat_list, link) {
+		keyboard = weston_seat_get_keyboard(seat);
+		if (!keyboard)
+			continue;
+
+		wl_resource_for_each(cr, &keyboard->focus_resource_list)
+			wl_keyboard_send_repeat_info(cr, rate, delay);
+		wl_resource_for_each(cr, &keyboard->resource_list)
+			wl_keyboard_send_repeat_info(cr, rate, delay);
+	}
+}
+
 WL_EXPORT int
 weston_compositor_set_presentation_clock(struct weston_compositor *compositor,
 					 clockid_t clk_id)

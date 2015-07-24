@@ -1444,6 +1444,10 @@ void
 weston_compositor_set_default_pointer_grab(struct weston_compositor *compositor,
 			const struct weston_pointer_grab_interface *interface);
 
+void
+weston_compositor_set_keyboard_repeat_info(struct weston_compositor *ec,
+					   int rate, int delay);
+
 int
 weston_environment_get_fd(const char *env);
 
