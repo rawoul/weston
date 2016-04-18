@@ -148,6 +148,14 @@ if test x$enable_xkbcommon = xyes; then
 	COMPOSITOR_MODULES="$COMPOSITOR_MODULES xkbcommon >= 0.3.0"
 fi
 
+
+AC_ARG_ENABLE(lh-udp,
+              AS_HELP_STRING([--enable-lh-udp],
+                             [build the liblh based UDP hid server]),,
+              enable_lh_udp=no)
+AM_CONDITIONAL(ENABLE_LH_UDP, test x$enable_lh_udp = xyes)
+
+
 AC_ARG_ENABLE(setuid-install, [  --enable-setuid-install],,
 	      enable_setuid_install=yes)
 AM_CONDITIONAL(ENABLE_SETUID_INSTALL, test x$enable_setuid_install = xyes)
@@ -298,7 +306,12 @@ if test x$need_libinput = xyes; then
 fi
 
 if test x$need_liblh = xyes; then
-  PKG_CHECK_MODULES(LIBLH, [lh ela fbxevent fbxbus fbxsystem fbxmdnssd])
+  LIBLH_MODULES="lh ela fbxevent fbxbus"
+  if test x$enable_lh_udp = xyes; then
+    AC_DEFINE([ENABLE_LH_UDP], [1], [Build Weston with UDP HID server in the liblh input backend])
+    LIBLH_MODULES="$LIBLH_MODULES fbxsystem fbxmdnssd"
+  fi
+  PKG_CHECK_MODULES(LIBLH, [$LIBLH_MODULES])
 fi
 
 AC_ARG_ENABLE([screen-sharing], [  --enable-screen-sharing],,

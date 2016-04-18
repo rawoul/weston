@@ -41,9 +41,6 @@ struct input_lh {
 	struct fbxbus_ctx *bus;
 	struct wl_event_source *fbxevent_source;
 	struct weston_compositor *compositor;
-	char *mdns_name;
-	int mdns_published;
-	unsigned mdns_id;
 	struct input_lh_seat seat;
 	struct wl_list device_list;
 	struct wl_event_source *regrab_idle;
@@ -52,6 +49,7 @@ struct input_lh {
 	struct fbx_pointer_context *fbx_pointer;
 	struct fbx_gamepad_context *fbx_gamepad;
 	struct fbx_text_context *fbx_text;
+	struct wl_signal destroy_signal;
 };
 
 int input_lh_init(struct input_lh *input, struct weston_compositor *c);

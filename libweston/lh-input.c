@@ -17,25 +17,18 @@
 #include <lh/listener.h>
 #include <lh/enumerator/fbxdev.h>
 #include <lh/enumerator/socket.h>
-#include <lh/enumerator/rudp.h>
 #include <lh/hid/descriptor.h>
 #include <lh/hid/descriptor_walker.h>
 #include <lh/hid/usage_page.h>
 #include <lh/semantic/mapping.h>
 #include <lh/semantic/usage_extractor.h>
 
-#include <libfbxbus.h>
-#include <fbxsystem.h>
-#include <fbxmdnssd.h>
-
 #include <wayland-server.h>
 
 #include "ela-wayland.h"
 #include "lh-input.h"
+#include "lh-udp.h"
 #include "shared/helpers.h"
-
-#define UDP_HID_SRV	"_hid._udp"
-#define UDP_HID_PORT	24322
 
 #define SOCKET_NAME	"\0lh_devices.sock"
 
@@ -1148,77 +1141,6 @@ static const struct lh_global_listener_handler global_handler = {
 };
 
 static int
-publish_hid_service(struct input_lh *input)
-{
-	if (input->mdns_published) {
-		fbxmdnssd_remove(input->bus, input->mdns_id);
-		input->mdns_published = 0;
-	}
-
-	if (!input->mdns_name)
-		return 0;
-
-	weston_log("registering hid mDNS service with name %s\n",
-		   input->mdns_name);
-
-	if (fbxmdnssd_publish(input->bus, input->mdns_name,
-			      UDP_HID_SRV, UDP_HID_PORT,
-			      FBXMDNSSD_PROTOCOL_ALL,
-			      &input->mdns_id) != FBXMDNSSD_SUCCESS)
-		return -1;
-
-	input->mdns_published = 1;
-
-	return 0;
-}
-
-static int
-set_network_name(struct input_lh *input, const char *name)
-{
-	free(input->mdns_name);
-	input->mdns_name = name ? strdup(name) : NULL;
-
-	return publish_hid_service(input);
-}
-
-static void
-handle_system_name(void *data, const char *name,
-		   const char *dns_name,
-		   const char *mdns_name,
-		   const char *netbios_name)
-{
-	struct input_lh *input = data;
-
-	set_network_name(input, name);
-}
-
-static void
-handle_mdnssd_startup(struct fbxbus_msg *msg, void *data)
-{
-	struct input_lh *input = data;
-	const char *srvname;
-
-	srvname = fbxbus_msg_get_str(msg);
-	if (!srvname || strcmp(srvname, "fbxmdnssd"))
-		return;
-
-	publish_hid_service(input);
-}
-
-static void
-handle_mdnssd_exit(struct fbxbus_msg *msg, void *data)
-{
-	struct input_lh *input = data;
-	const char *srvname;
-
-	srvname = fbxbus_msg_get_str(msg);
-	if (!srvname || strcmp(srvname, "fbxmdnssd"))
-		return;
-
-	input->mdns_published = 0;
-}
-
-static int
 enumerate_kernel_devices(struct input_lh *input)
 {
 	struct lh_enumerator *e;
@@ -1253,32 +1175,6 @@ enumerate_user_devices(struct input_lh *input)
 	}
 
 	lh_enumerator_socket_create(&input->lh, input->loop, fd, &e);
-
-	return 0;
-}
-
-static int
-enumerate_network_devices(struct input_lh *input)
-{
-	struct lh_enumerator *e;
-	char *name;
-
-	if (lh_rudp_server_create(&input->lh, input->loop, UDP_HID_PORT, &e)) {
-		weston_log("failed to create rudp server\n");
-		return -1;
-	}
-
-	fbxsystem_register_name_changed(input->bus, handle_system_name, input);
-	if (!fbxsystem_name_get(input->bus, &name)) {
-		set_network_name(input, name);
-		free(name);
-	}
-
-	fbxbus_register(input->bus, FBXBUS_SIGNAL, FBXBUS_DAEMON_MSG_PATH,
-			"name_acquired", handle_mdnssd_startup, input);
-
-	fbxbus_register(input->bus, FBXBUS_SIGNAL, FBXBUS_DAEMON_MSG_PATH,
-			"name_lost", handle_mdnssd_exit, input);
 
 	return 0;
 }
@@ -1467,6 +1363,7 @@ input_lh_init(struct input_lh *input, struct weston_compositor *c)
 	loop = wl_display_get_event_loop(c->wl_display);
 	input->loop = ela_wayland_create(loop);
 
+	wl_signal_init(&input->destroy_signal);
 	wl_list_init(&input->device_list);
 
 	weston_seat_init(&input->seat.base, c, "default");
@@ -1487,7 +1384,8 @@ input_lh_init(struct input_lh *input, struct weston_compositor *c)
 
 	enumerate_kernel_devices(input);
 	enumerate_user_devices(input);
-	enumerate_network_devices(input);
+
+	input_lh_init_udp(input);
 
 	return 0;
 
@@ -1499,15 +1397,7 @@ err_init:
 void
 input_lh_shutdown(struct input_lh *input)
 {
-	fbxsystem_register_name_changed(input->bus, NULL, NULL);
-
-	fbxbus_unregister(input->bus, FBXBUS_SIGNAL, FBXBUS_DAEMON_MSG_PATH,
-			  "name_acquired");
-
-	fbxbus_unregister(input->bus, FBXBUS_SIGNAL, FBXBUS_DAEMON_MSG_PATH,
-			  "name_lost");
-
-	set_network_name(input, NULL);
+	wl_signal_emit(&input->destroy_signal, input);
 
 	fbx_pointer_destroy(input->fbx_pointer);
 	input->fbx_pointer = NULL;

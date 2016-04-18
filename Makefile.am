@@ -350,6 +350,7 @@ LH_BACKEND_CFLAGS = $(LIBLH_CFLAGS)
 LH_BACKEND_SOURCES =				\
 	libweston/ela-wayland.c			\
 	libweston/lh-input.c			\
+	libweston/lh-udp.c			\
 	libweston/lh-hid.c			\
 	libweston/lh-pointer.c			\
 	libweston/lh-text.c			\
