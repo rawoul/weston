@@ -86,7 +86,7 @@ AC_ARG_VAR([WESTON_SHELL_CLIENT],
 
 PKG_PROG_PKG_CONFIG()
 
-WESTON_SEARCH_LIBS([DLOPEN], [dl], [dlopen])
+WESTON_SEARCH_LIBS([DLOPEN], [dl], [dlsym])
 
 # In old glibc versions (< 2.17) clock_gettime() is in librt
 WESTON_SEARCH_LIBS([CLOCK_GETTIME], [rt], [clock_gettime])
