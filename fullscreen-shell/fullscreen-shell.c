@@ -45,6 +45,8 @@ struct fullscreen_shell {
 	struct weston_layer layer;
 	struct wl_list output_list;
 	struct wl_listener output_created_listener;
+	struct wl_listener output_resized_listener;
+	struct wl_listener output_moved_listener;
 
 	struct wl_listener seat_created_listener;
 
@@ -245,9 +247,9 @@ create_black_surface(struct weston_compositor *ec, struct fs_output *fsout,
 	surface->committed_private = fsout;
 	weston_surface_set_color(surface, 0.0f, 0.0f, 0.0f, 1.0f);
 	pixman_region32_fini(&surface->opaque);
-	pixman_region32_init_rect(&surface->opaque, 0, 0, w, h);
+	pixman_region32_init_rect(&surface->opaque, 0, 0, 8192, 8192);
 	pixman_region32_fini(&surface->input);
-	pixman_region32_init_rect(&surface->input, 0, 0, w, h);
+	pixman_region32_init_rect(&surface->input, 0, 0, 8192, 8192);
 
 	weston_surface_set_size(surface, w, h);
 	weston_view_set_position(view, x, y);
@@ -846,6 +848,16 @@ struct zwp_fullscreen_shell_v1_interface fullscreen_shell_implementation = {
 };
 
 static void
+output_geometry_changed(struct wl_listener *listener, void *data)
+{
+	struct fs_output *fsout;
+
+	fsout = fs_output_for_output(data);
+	if (fsout && fsout->surface)
+		fs_output_configure(fsout, fsout->surface);
+}
+
+static void
 output_created(struct wl_listener *listener, void *data)
 {
 	struct fullscreen_shell *shell;
@@ -920,6 +932,14 @@ module_init(struct weston_compositor *compositor,
 		      &shell->output_created_listener);
 	wl_list_for_each(output, &compositor->output_list, link)
 		fs_output_create(shell, output);
+
+	shell->output_resized_listener.notify = output_geometry_changed;
+	wl_signal_add(&compositor->output_resized_signal,
+		      &shell->output_resized_listener);
+
+	shell->output_moved_listener.notify = output_geometry_changed;
+	wl_signal_add(&compositor->output_moved_signal,
+		      &shell->output_moved_listener);
 
 	shell->seat_created_listener.notify = seat_created;
 	wl_signal_add(&compositor->seat_created_signal,
