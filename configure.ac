@@ -439,13 +439,18 @@ AC_ARG_ENABLE(resize-optimization,
 AS_IF([test "x$enable_resize_optimization" = "xyes"],
       [AC_DEFINE([USE_RESIZE_POOL], [1], [Use resize memory pool as a performance optimization])])
 
+AC_ARG_WITH(pam,
+            AS_HELP_STRING([--with-pam], [Use PAM]),
+            [use_pam=$withval], [use_pam=yes])
+
 AC_ARG_ENABLE(weston-launch, [  --enable-weston-launch],, enable_weston_launch=yes)
 AM_CONDITIONAL(BUILD_WESTON_LAUNCH, test x$enable_weston_launch = xyes)
-if test x$enable_weston_launch = xyes; then
+if test x$enable_weston_launch = xyes -a x$use_pam = xyes; then
   WESTON_SEARCH_LIBS([PAM], [pam], [pam_open_session], [have_pam=yes], [have_pam=no])
   if test x$have_pam = xno; then
-    AC_ERROR([weston-launch requires pam])
+    AC_ERROR([PAM support is explicitly requested, but libpam couldn't be found])
   fi
+  AC_DEFINE([HAVE_PAM], [1], [Define if PAM is available])
 fi
 
 AM_CONDITIONAL(HAVE_PANGO, test "x$have_pango" = "xyes")
@@ -702,6 +707,7 @@ AC_MSG_RESULT([
 	Enable developer documentation	${enable_devdocs}
 
 	weston-launch utility		${enable_weston_launch}
+	PAM support			${use_pam}
 	systemd-login support		${have_systemd_login}
 	systemd notify support		${enable_systemd_notify}
 
