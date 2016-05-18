@@ -7,7 +7,9 @@
 #include <sys/ioctl.h>
 
 #include <linux/fb.h>
+#include <linux/msm_ion.h>
 #include <linux/msm_mdp.h>
+#include <linux/msm_mdp_ext.h>
 
 #include "compositor-qcom.h"
 #include "compositor.h"
@@ -55,8 +57,19 @@ struct qcom_backend {
 	struct input_lh input;
 	uint32_t output_transform;
 
+	int ion_fd;
+
 	struct qcom_hwinfo hwinfo;
 	struct wl_list plane_list;
+};
+
+struct qcom_fb {
+	int fd;
+	int width;
+	int height;
+	int stride;
+	int format;
+	void *data;
 };
 
 struct qcom_screeninfo {
@@ -85,11 +98,11 @@ struct qcom_output {
 	char *device;
 	int fd;
 	struct qcom_screeninfo fb_info;
-	void *fb; /* length is fb_info.buffer_length */
+	struct qcom_fb *fb[2];
+	pixman_image_t *image[2];
+	int current_fb;
 
-	/* pixman details. */
-	pixman_image_t *hw_surface;
-	uint8_t depth;
+	pixman_region32_t previous_damage;
 };
 
 struct qcom_plane {
@@ -122,19 +135,83 @@ qcom_output_start_repaint_loop(struct weston_output *output)
 }
 
 static int
+qcom_output_commit(struct qcom_output *output)
+{
+	struct qcom_fb *fb;
+	struct mdp_input_layer in_layers[1];
+	struct mdp_layer_commit commit;
+
+	fb = output->fb[output->current_fb];
+
+	memset(in_layers, 0, sizeof (in_layers));
+	in_layers[0].pipe_ndx = 1 << 3;
+	in_layers[0].alpha = 255;
+	in_layers[0].color_space = MDP_CSC_ITU_R_709;
+	in_layers[0].src_rect.w = fb->width;
+	in_layers[0].src_rect.h = fb->height;
+	in_layers[0].dst_rect.w = fb->width;
+	in_layers[0].dst_rect.h = fb->height;
+	in_layers[0].buffer.width = fb->width;
+	in_layers[0].buffer.height = fb->height;
+	in_layers[0].buffer.format = fb->format;
+	in_layers[0].buffer.plane_count = 1;
+	in_layers[0].buffer.planes[0].fd = fb->fd;
+	in_layers[0].buffer.planes[0].stride = fb->stride;
+	in_layers[0].buffer.comp_ratio.numer = 1;
+	in_layers[0].buffer.comp_ratio.denom = 1;
+	in_layers[0].buffer.fence = -1;
+
+	memset(&commit, 0, sizeof (commit));
+	commit.version = MDP_COMMIT_VERSION_1_0;
+	commit.commit_v1.input_layers = in_layers;
+	commit.commit_v1.input_layer_cnt = 1;
+	commit.commit_v1.output_layer = NULL;
+	commit.commit_v1.release_fence = -1;
+	commit.commit_v1.retire_fence = -1;
+
+	if (ioctl(output->fd, MSMFB_ATOMIC_COMMIT, &commit) < 0) {
+		weston_log("failed to commit: %m\n");
+		return -1;
+	}
+
+	if (commit.commit_v1.release_fence != -1)
+		close(commit.commit_v1.release_fence);
+
+	if (commit.commit_v1.retire_fence != -1)
+		close(commit.commit_v1.retire_fence);
+
+	return 0;
+}
+
+static int
 qcom_output_repaint(struct weston_output *base, pixman_region32_t *damage)
 {
 	struct qcom_output *output = qcom_output(base);
 	struct qcom_backend *backend = output->backend;
 	struct weston_compositor *ec = backend->compositor;
 
-	/* Repaint the damaged region onto the back buffer. */
-	pixman_renderer_output_set_buffer(base, output->hw_surface);
-	ec->renderer->repaint_output(base, damage);
+	if (pixman_region32_not_empty(damage)) {
+		pixman_region32_t total_damage;
 
-	/* Update the damage region. */
-	pixman_region32_subtract(&ec->primary_plane.damage,
-				 &ec->primary_plane.damage, damage);
+		output->current_fb ^= 1;
+
+		pixman_region32_init(&total_damage);
+		pixman_region32_union(&total_damage, damage,
+				      &output->previous_damage);
+		pixman_region32_copy(&output->previous_damage, damage);
+
+		pixman_renderer_output_set_buffer(base,
+				output->image[output->current_fb]);
+		ec->renderer->repaint_output(base, &total_damage);
+
+		pixman_region32_fini(&total_damage);
+
+		pixman_region32_subtract(&ec->primary_plane.damage,
+					 &ec->primary_plane.damage, damage);
+	}
+
+	if (qcom_output_commit(output) < 0)
+		return -1;
 
 	/* Schedule the end of the frame. We do not sync this to the frame
 	 * buffer clock because users who want that should be using the DRM
@@ -160,6 +237,84 @@ finish_frame_handler(void *data)
 	weston_output_finish_frame(&output->base, &ts, 0);
 
 	return 1;
+}
+
+static void
+qcom_fb_destroy(struct qcom_fb *fb)
+{
+	if (fb->data != NULL) {
+		if (munmap(fb->data, fb->stride * fb->height) < 0)
+			weston_log("failed to unmap framebuffer: %m\n");
+	}
+
+	if (fb->fd != -1) {
+		if (close(fb->fd) < 0)
+			weston_log("failed to close framebuffer: %m\n");
+	}
+
+	free(fb);
+}
+
+static struct qcom_fb *
+qcom_fb_create(struct qcom_backend *backend, int width, int height)
+{
+	struct qcom_fb *fb;
+	struct ion_allocation_data ion_alloc;
+	struct ion_fd_data ion_fd;
+	struct ion_handle_data ion_handle;
+
+	fb = zalloc(sizeof *fb);
+	if (!fb)
+		return NULL;
+
+	fb->width = width;
+	fb->height = height;
+	fb->format = MDP_BGRA_8888;
+	fb->stride = width * 4;
+	fb->fd = -1;
+
+	memset(&ion_alloc, 0, sizeof (ion_alloc));
+	ion_alloc.len = fb->stride * height;
+	ion_alloc.align = sysconf(_SC_PAGESIZE);
+	ion_alloc.heap_id_mask = ION_HEAP(ION_SYSTEM_HEAP_ID);
+	ion_alloc.flags = 0; //ION_FLAG_CACHED;
+
+	if (ioctl(backend->ion_fd, ION_IOC_ALLOC, &ion_alloc) < 0) {
+		weston_log("failed to allocate %dx%d ion buffer: %m\n",
+			   width, height);
+		goto fail;
+	}
+
+	memset(&ion_fd, 0, sizeof (ion_fd));
+	ion_fd.handle = ion_alloc.handle;
+
+	if (ioctl(backend->ion_fd, ION_IOC_MAP, &ion_fd) < 0) {
+		weston_log("failed to map ion buffer: %m\n");
+		goto fail;
+	}
+
+	fb->fd = ion_fd.fd;
+
+	fb->data = mmap(0, ion_alloc.len, PROT_READ | PROT_WRITE, MAP_SHARED,
+			fb->fd, 0);
+	if (fb->data == MAP_FAILED) {
+		weston_log("failed to map ion buffer: %m\n");
+		goto fail;
+	}
+
+ion_free:
+	memset(&ion_handle, 0, sizeof (ion_handle));
+	ion_handle.handle = ion_alloc.handle;
+
+	if (ioctl(backend->ion_fd, ION_IOC_FREE, &ion_handle) < 0)
+		weston_log("failed to release ion buffer: %m\n");
+
+	return fb;
+
+fail:
+	qcom_fb_destroy(fb);
+	fb = NULL;
+	goto ion_free;
 }
 
 static pixman_format_code_t
@@ -310,11 +465,6 @@ qcom_fbdev_destroy(struct qcom_output *output)
 {
 	weston_log("destroying fbdev frame buffer.\n");
 
-	if (munmap(output->fb, output->fb_info.buffer_length) < 0)
-		weston_log("failed to munmap frame buffer: %m\n");
-
-	output->fb = NULL;
-
 	if (close(output->fd) < 0)
 		weston_log("failed to close frame buffer: %m\n");
 
@@ -348,51 +498,46 @@ qcom_fbdev_open(struct qcom_output *output, const char *fb_dev,
 }
 
 static int
-qcom_fbdev_map(struct qcom_output *output)
+qcom_output_init_pixman(struct qcom_output *output)
 {
-	weston_log("mapping fbdev frame buffer\n");
+	int w = output->base.current_mode->width;
+	int h = output->base.current_mode->height;
 
-	output->fb = mmap(NULL, output->fb_info.buffer_length,
-	                  PROT_WRITE, MAP_SHARED, output->fd, 0);
-	if (output->fb == MAP_FAILED) {
-		weston_log("failed to mmap frame buffer: %m\n");
-		return -1;
+	for (unsigned i = 0; i < ARRAY_LENGTH(output->fb); i++) {
+		output->fb[i] = qcom_fb_create(output->backend, w, h);
+		if (!output->fb[i])
+			goto fail;
+
+		output->image[i] =
+			pixman_image_create_bits(PIXMAN_a8r8g8b8, w, h,
+						 output->fb[i]->data,
+						 output->fb[i]->stride);
+		if (output->image[i] == NULL) {
+			weston_log("failed to create image for fb\n");
+			goto fail;
+		}
 	}
 
-	output->hw_surface =
-		pixman_image_create_bits(output->fb_info.pixel_format,
-		                         output->fb_info.x_resolution,
-		                         output->fb_info.y_resolution,
-		                         output->fb,
-		                         output->fb_info.line_length);
-	if (output->hw_surface == NULL) {
-		weston_log("failed to create surface for frame buffer\n");
+	if (pixman_renderer_output_create(&output->base) < 0)
 		goto fail;
-	}
+
+	pixman_region32_init_rect(&output->previous_damage,
+				  output->base.x, output->base.y,
+				  output->base.width, output->base.height);
 
 	return 0;
 
 fail:
-	qcom_fbdev_destroy(output);
-	return -1;
-}
-
-/* NOTE: This leaves output->fb_info populated, caching data so that if
- * qcom_output_reenable() is called again, it can determine whether a mode-set
- * is needed. */
-static void
-qcom_output_disable(struct weston_output *base)
-{
-	struct qcom_output *output = qcom_output(base);
-
-	weston_log("disabling fbdev output\n");
-
-	if (output->hw_surface != NULL) {
-		pixman_image_unref(output->hw_surface);
-		output->hw_surface = NULL;
+	for (unsigned i = 0; i < ARRAY_LENGTH(output->fb); i++) {
+		if (output->fb[i])
+			qcom_fb_destroy(output->fb[i]);
+		if (output->image[i])
+			pixman_image_unref(output->image[i]);
+		output->fb[i] = NULL;
+		output->image[i] = NULL;
 	}
 
-	qcom_fbdev_destroy(output);
+	return -1;
 }
 
 static void
@@ -402,10 +547,19 @@ qcom_output_destroy(struct weston_output *base)
 
 	weston_log("destroying fbdev output\n");
 
-	qcom_output_disable(base);
+	qcom_fbdev_destroy(output);
+
+	pixman_region32_fini(&output->previous_damage);
 
 	if (base->renderer_state != NULL)
 		pixman_renderer_output_destroy(base);
+
+	for (unsigned i = 0; i < ARRAY_LENGTH(output->fb); i++) {
+		if (output->fb[i] != NULL)
+			qcom_fb_destroy(output->fb[i]);
+		if (output->image[i] != NULL)
+			pixman_image_unref(output->image[i]);
+	}
 
 	weston_output_destroy(&output->base);
 
@@ -429,10 +583,7 @@ qcom_output_create(struct qcom_backend *backend, const char *device)
 	output->device = strdup(device);
 
 	if (qcom_fbdev_open(output, device, &output->fb_info) < 0)
-		goto out_free_early;
-
-	if (qcom_fbdev_map(output) < 0)
-		goto out_free_early;
+		goto err_free;
 
 	output->base.start_repaint_loop = qcom_output_start_repaint_loop;
 	output->base.repaint = qcom_output_repaint;
@@ -456,8 +607,8 @@ qcom_output_create(struct qcom_backend *backend, const char *device)
 	weston_output_init(&output->base, backend->compositor,
 	                   0, 0, 0, 0, backend->output_transform, 1);
 
-	if (pixman_renderer_output_create(&output->base) < 0)
-		goto out_free_output;
+	if (qcom_output_init_pixman(output) < 0)
+		goto err_output;
 
 	loop = wl_display_get_event_loop(backend->compositor->wl_display);
 	output->finish_frame_timer =
@@ -471,15 +622,22 @@ qcom_output_create(struct qcom_backend *backend, const char *device)
 
 	return 0;
 
-out_free_output:
-	qcom_output_destroy(&output->base);
-	return -1;
+err_output:
+	weston_output_destroy(&output->base);
 
-out_free_early:
+err_free:
 	qcom_fbdev_destroy(output);
 	free(output->device);
 	free(output);
 	return -1;
+}
+
+static void
+qcom_plane_destroy(struct qcom_plane *plane)
+{
+	wl_list_remove(&plane->link);
+	weston_plane_release(&plane->base);
+	free(plane);
 }
 
 static struct qcom_plane *
@@ -656,9 +814,18 @@ static void
 qcom_destroy(struct weston_compositor *compositor)
 {
 	struct qcom_backend *b = (struct qcom_backend *) compositor->backend;
+	struct qcom_plane *plane, *next;
+
+	wl_list_for_each_safe(plane, next, &b->plane_list, link)
+		qcom_plane_destroy(plane);
 
 	input_lh_shutdown(&b->input);
 	weston_compositor_shutdown(compositor);
+
+	if (close(b->ion_fd) < 0)
+		weston_log("failed to close ion device: %m\n");
+
+	free(b->pipes);
 	free(b);
 }
 
@@ -676,6 +843,12 @@ qcom_backend_create(struct weston_compositor *compositor,
 
 	b->compositor = compositor;
 
+	b->ion_fd = open("/dev/ion", O_RDONLY);
+	if (b->ion_fd < 0) {
+		weston_log("failed to open ion device: %m\n");
+		goto err_free;
+	}
+
 	b->base.destroy = qcom_destroy;
 	b->base.restore = qcom_restore;
 
@@ -683,11 +856,11 @@ qcom_backend_create(struct weston_compositor *compositor,
 	wl_list_init(&b->plane_list);
 
 	if (pixman_renderer_init(compositor) < 0)
-		goto err_free;
+		goto err_ion;
 
 	if (input_lh_init(&b->input, compositor) < 0) {
 		weston_log("failed to create input devices\n");
-		goto err_free;
+		goto err_ion;
 	}
 
 	if (qcom_init_hw_info(b) < 0)
@@ -699,6 +872,8 @@ qcom_backend_create(struct weston_compositor *compositor,
 	compositor->backend = &b->base;
 	return b;
 
+err_ion:
+	close(b->ion_fd);
 err_input:
 	input_lh_shutdown(&b->input);
 err_free:
