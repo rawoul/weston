@@ -92,7 +92,9 @@ struct qcom_output {
 	struct weston_output base;
 
 	struct weston_mode mode;
-	struct wl_event_source *finish_frame_timer;
+
+	int vsync_fd;
+	struct wl_event_source *vsync_event;
 
 	/* Frame buffer details. */
 	char *device;
@@ -111,6 +113,9 @@ struct qcom_plane {
 	uint32_t index;
 	enum mdp_overlay_pipe_type type;
 };
+
+static int qcom_fbdev_vsync_on(struct qcom_output *output);
+static int qcom_fbdev_vsync_off(struct qcom_output *output);
 
 static inline struct qcom_output *
 qcom_output(struct weston_output *base)
@@ -180,6 +185,9 @@ qcom_output_commit(struct qcom_output *output)
 	if (commit.commit_v1.retire_fence != -1)
 		close(commit.commit_v1.retire_fence);
 
+	if (output->vsync_fd < 0 && qcom_fbdev_vsync_on(output) < 0)
+		return -1;
+
 	return 0;
 }
 
@@ -213,30 +221,38 @@ qcom_output_repaint(struct weston_output *base, pixman_region32_t *damage)
 	if (qcom_output_commit(output) < 0)
 		return -1;
 
-	/* Schedule the end of the frame. We do not sync this to the frame
-	 * buffer clock because users who want that should be using the DRM
-	 * compositor. FBIO_WAITFORVSYNC blocks and FB_ACTIVATE_VBL requires
-	 * panning, which is broken in most kernel drivers.
-	 *
-	 * Finish the frame synchronised to the specified refresh rate. The
-	 * refresh rate is given in mHz and the interval in ms. */
-	wl_event_source_timer_update(output->finish_frame_timer,
-				     1000000 / output->mode.refresh);
-
 	return 0;
 }
 
 static int
-finish_frame_handler(void *data)
+finish_frame_handler(int fd, uint32_t mask, void *data)
 {
 	struct qcom_output *output = data;
-	struct timespec ts;
+	char buf[64];
+	int ret;
 
-	weston_compositor_read_presentation_clock(output->base.compositor,
-						  &ts);
-	weston_output_finish_frame(&output->base, &ts, 0);
+	if (!(mask & WL_EVENT_URGENT))
+		return 0;
 
-	return 1;
+	ret = pread(fd, buf, sizeof (buf), 0);
+	if (ret < 0) {
+		weston_log("failed to read vsync event: %m\n");
+		return 0;
+	}
+
+	if (!strncmp(buf, "VSYNC=", 6)) {
+		struct timespec ts;
+		int64_t timestamp = strtoull(buf + 6, NULL, 0);
+
+		ts.tv_sec = timestamp / 1000000000;
+		ts.tv_nsec = timestamp % 1000000000;
+
+		weston_output_finish_frame(&output->base, &ts,
+				WP_PRESENTATION_FEEDBACK_KIND_HW_COMPLETION |
+				WP_PRESENTATION_FEEDBACK_KIND_VSYNC);
+	}
+
+	return 0;
 }
 
 static void
@@ -465,6 +481,8 @@ qcom_fbdev_destroy(struct qcom_output *output)
 {
 	weston_log("destroying fbdev frame buffer.\n");
 
+	qcom_fbdev_vsync_off(output);
+
 	if (close(output->fd) < 0)
 		weston_log("failed to close frame buffer: %m\n");
 
@@ -493,6 +511,63 @@ qcom_fbdev_open(struct qcom_output *output, const char *fb_dev,
 	}
 
 	output->fd = fd;
+
+	return 0;
+}
+
+static int
+qcom_fbdev_vsync_on(struct qcom_output *output)
+{
+	struct wl_event_loop *loop;
+	int enable = 1;
+	int fd;
+
+	if (output->vsync_fd != -1)
+		return 0;
+
+	if (ioctl(output->fd, MSMFB_OVERLAY_VSYNC_CTRL, &enable) < 0) {
+		weston_log("failed to enable vsync ctrl: %m\n");
+		return -1;
+	}
+
+	fd = open("/sys/class/graphics/fb0/vsync_event", O_RDONLY);
+	if (fd < 0) {
+		weston_log("failed to open vsync event file: %m");
+		return -1;
+	}
+
+	output->vsync_fd = fd;
+
+	loop = wl_display_get_event_loop(output->base.compositor->wl_display);
+	output->vsync_event =
+		wl_event_loop_add_fd(loop, fd, WL_EVENT_URGENT,
+				     finish_frame_handler, output);
+
+	return 0;
+}
+
+static int
+qcom_fbdev_vsync_off(struct qcom_output *output)
+{
+	int enable = 0;
+
+	if (output->vsync_fd == -1)
+		return 0;
+
+	if (close(output->vsync_fd) < 0)
+		weston_log("failed to close vsync fd: %m\n");
+
+	output->vsync_fd = -1;
+
+	if (output->vsync_event != NULL) {
+		wl_event_source_remove(output->vsync_event);
+		output->vsync_event = NULL;
+	}
+
+	if (ioctl(output->fd, MSMFB_OVERLAY_VSYNC_CTRL, &enable) < 0) {
+		weston_log("failed to disable vsync ctrl: %m\n");
+		return -1;
+	}
 
 	return 0;
 }
@@ -571,7 +646,6 @@ static int
 qcom_output_create(struct qcom_backend *backend, const char *device)
 {
 	struct qcom_output *output;
-	struct wl_event_loop *loop;
 
 	weston_log("creating fbdev output\n");
 
@@ -581,6 +655,7 @@ qcom_output_create(struct qcom_backend *backend, const char *device)
 
 	output->backend = backend;
 	output->device = strdup(device);
+	output->vsync_fd = -1;
 
 	if (qcom_fbdev_open(output, device, &output->fb_info) < 0)
 		goto err_free;
@@ -609,10 +684,6 @@ qcom_output_create(struct qcom_backend *backend, const char *device)
 
 	if (qcom_output_init_pixman(output) < 0)
 		goto err_output;
-
-	loop = wl_display_get_event_loop(backend->compositor->wl_display);
-	output->finish_frame_timer =
-		wl_event_loop_add_timer(loop, finish_frame_handler, output);
 
 	weston_compositor_add_output(backend->compositor, &output->base);
 
@@ -862,6 +933,8 @@ qcom_backend_create(struct weston_compositor *compositor,
 		weston_log("failed to create input devices\n");
 		goto err_ion;
 	}
+
+	weston_compositor_set_presentation_clock(compositor, CLOCK_MONOTONIC);
 
 	if (qcom_init_hw_info(b) < 0)
 		goto err_input;
