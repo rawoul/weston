@@ -279,6 +279,7 @@ AC_ARG_ENABLE(qcom-compositor,
 AM_CONDITIONAL(ENABLE_QCOM_COMPOSITOR, test "x$enable_qcom_compositor" = "xyes")
 if test "x$enable_qcom_compositor" = "xyes"; then
   AC_DEFINE([BUILD_QCOM_COMPOSITOR], [1], [Build the compositor for Qualcomm SOC])
+  PKG_CHECK_MODULES(QCOM_COMPOSITOR, [libdrm])
   need_liblh="yes"
 fi
 
