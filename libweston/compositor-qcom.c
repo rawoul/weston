@@ -157,13 +157,44 @@ qcom_backend(struct weston_compositor *base)
 	return container_of(base->backend, struct qcom_backend, base);
 }
 
-static void
-qcom_output_start_repaint_loop(struct weston_output *output)
+static int
+qcom_output_get_vsync_ts(struct qcom_output *output, struct timespec *ts)
 {
+	int64_t timestamp;
+	char buf[64];
+	ssize_t r;
+
+	if (output->vsync_fd < 0)
+		return -1;
+
+	r = pread(output->vsync_fd, buf, sizeof (buf), 0);
+	if (r < 0) {
+		weston_log("failed to read vsync timestamp: %m\n");
+		return -1;
+	}
+
+	buf[r] = '\0';
+
+	if (strncmp(buf, "VSYNC=", 6) != 0)
+		return -1;
+
+	timestamp = strtoull(buf + 6, NULL, 0);
+	ts->tv_sec = timestamp / 1000000000;
+	ts->tv_nsec = timestamp % 1000000000;
+
+	return 0;
+}
+
+static void
+qcom_output_start_repaint_loop(struct weston_output *base_output)
+{
+	struct qcom_output *output = qcom_output(base_output);
 	struct timespec ts;
 
-	weston_compositor_read_presentation_clock(output->compositor, &ts);
-	weston_output_finish_frame(output, &ts,
+	if (qcom_output_get_vsync_ts(output, &ts) < 0)
+		weston_compositor_read_presentation_clock(base_output->compositor, &ts);
+
+	weston_output_finish_frame(base_output, &ts,
 				   WP_PRESENTATION_FEEDBACK_INVALID);
 }
 
@@ -494,37 +525,25 @@ static int
 finish_frame_handler(int fd, uint32_t mask, void *data)
 {
 	struct qcom_output *output = data;
-	char buf[64];
-	int ret;
+	struct qcom_plane *plane;
+	struct timespec ts;
 
 	if (!(mask & WL_EVENT_URGENT))
 		return 0;
 
-	ret = pread(fd, buf, sizeof (buf), 0);
-	if (ret < 0) {
-		weston_log("failed to read vsync event: %m\n");
+	if (qcom_output_get_vsync_ts(output, &ts) < 0)
 		return 0;
-	}
 
-	if (!strncmp(buf, "VSYNC=", 6)) {
-		struct timespec ts;
-		int64_t timestamp = strtoull(buf + 6, NULL, 0);
-		struct qcom_plane *plane;
-
-		ts.tv_sec = timestamp / 1000000000;
-		ts.tv_nsec = timestamp % 1000000000;
-
-		wl_list_for_each(plane, &output->backend->plane_list, link) {
-			if (plane->next) {
-				plane->current = plane->next;
-				plane->next = NULL;
-			}
+	wl_list_for_each(plane, &output->backend->plane_list, link) {
+		if (plane->next) {
+			plane->current = plane->next;
+			plane->next = NULL;
 		}
-
-		weston_output_finish_frame(&output->base, &ts,
-				WP_PRESENTATION_FEEDBACK_KIND_HW_COMPLETION |
-				WP_PRESENTATION_FEEDBACK_KIND_VSYNC);
 	}
+
+	weston_output_finish_frame(&output->base, &ts,
+				   WP_PRESENTATION_FEEDBACK_KIND_HW_COMPLETION |
+				   WP_PRESENTATION_FEEDBACK_KIND_VSYNC);
 
 	return 0;
 }
