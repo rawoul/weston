@@ -44,7 +44,7 @@
 
 struct qcom_fence;
 
-struct qcom_hwpipe {
+struct qcom_pipe {
 	uint32_t index;
 	enum mdp_overlay_pipe_type type;
 };
@@ -73,7 +73,12 @@ struct qcom_backend {
 	int ion_fd;
 
 	struct qcom_hwinfo hwinfo;
+	struct qcom_pipe *pipes;
+	int n_pipes;
+
 	struct wl_list plane_list;
+
+	uint32_t assigned_pipes;
 };
 
 typedef void (*qcom_fence_cb_t)(struct qcom_fence *fence, void *data);
@@ -134,8 +139,7 @@ struct qcom_output {
 struct qcom_plane {
 	struct weston_plane base;
 	struct wl_list link;
-	uint32_t index;
-	enum mdp_overlay_pipe_type type;
+	struct qcom_pipe *left, *right;
 	struct qcom_fb *current;
 	struct qcom_fb *next;
 	struct mdp_rect src;
@@ -212,13 +216,28 @@ qcom_output_start_repaint_loop(struct weston_output *base_output)
 }
 
 static struct qcom_plane *
-find_plane_type(struct qcom_backend *backend, enum mdp_overlay_pipe_type type)
+find_plane(struct qcom_backend *backend)
 {
 	struct qcom_plane *plane;
 
 	wl_list_for_each(plane, &backend->plane_list, link) {
-		if (plane->type == type && !plane->next)
+		if (plane->next == NULL)
 			return plane;
+	}
+
+	return NULL;
+}
+
+static struct qcom_pipe *
+find_pipe(struct qcom_backend *backend, enum mdp_overlay_pipe_type type)
+{
+	struct qcom_pipe *pipe;
+
+	for (int i = 0; i < backend->n_pipes; i++) {
+		pipe = &backend->pipes[i];
+		if (pipe->type == type &&
+		    !(backend->assigned_pipes & pipe->index))
+			return pipe;
 	}
 
 	return NULL;
@@ -486,52 +505,102 @@ calculate_decimation(struct qcom_backend *backend, uint32_t src, uint32_t dst)
 	return decimation;
 }
 
-static void
+static int
 fill_layer_config(struct qcom_backend *backend,
 		  const struct qcom_plane *plane,
-		  struct mdp_input_layer *layer)
+		  struct mdp_input_layer *left,
+		  struct mdp_input_layer *right)
 {
 	struct qcom_fb *fb = plane->next;
 
-	layer->pipe_ndx = plane->index;
-	layer->alpha = plane->alpha;
-	layer->color_space = MDP_CSC_ITU_R_709;
-	layer->src_rect = plane->src;
-	layer->dst_rect = plane->dst;
-	layer->horz_deci =
-		calculate_decimation(backend, plane->src.w, plane->dst.w);
-	layer->vert_deci =
-		calculate_decimation(backend, plane->src.h, plane->dst.h);
-	layer->z_order = plane->zorder;
-	layer->blend_op = plane->blend_op;
+	left->pipe_ndx = plane->left->index;
+	left->alpha = plane->alpha;
+	left->color_space = MDP_CSC_ITU_R_709;
+	left->src_rect = plane->src;
+	left->dst_rect = plane->dst;
+	left->z_order = plane->zorder;
+	left->blend_op = plane->blend_op;
 	// HACK for UBWC...
-	layer->buffer.width = plane->format == MDP_Y_CBCR_H2V2_UBWC ?
+	left->buffer.width = plane->format == MDP_Y_CBCR_H2V2_UBWC ?
 		fb->stride : fb->width;
-	layer->buffer.height = fb->height;
-	layer->buffer.format = plane->format;
-	layer->buffer.plane_count = 1;
-	layer->buffer.planes[0].fd = fb->fd;
-	layer->buffer.planes[0].offset = fb->offset;
-	layer->buffer.planes[0].stride = fb->stride;
-	layer->buffer.comp_ratio.numer = 1;
-	layer->buffer.comp_ratio.denom = 1;
-	layer->buffer.fence = -1;
+	left->buffer.height = fb->height;
+	left->buffer.format = plane->format;
+	left->buffer.plane_count = 1;
+	left->buffer.planes[0].fd = fb->fd;
+	left->buffer.planes[0].offset = fb->offset;
+	left->buffer.planes[0].stride = fb->stride;
+	left->buffer.comp_ratio.numer = 1;
+	left->buffer.comp_ratio.denom = 1;
+	left->buffer.fence = -1;
 
-	dbg("config layer=%x type=%x z=%d a=%d "
+	if (plane->right) {
+		left->src_rect.w /= 2;
+		left->dst_rect.w /= 2;
+
+		// hardware only allows even values in source rectangle
+		if (left->src_rect.w & 1) {
+			left->dst_rect.w += roundf((float)left->dst_rect.w /
+						   (float)left->src_rect.w);
+			left->src_rect.w++;
+		}
+
+		memcpy(right, left, sizeof *right);
+		right->pipe_ndx = plane->right->index;
+		right->src_rect.w = plane->src.w - left->src_rect.w;
+		right->src_rect.x = left->src_rect.x + left->src_rect.w;
+		right->dst_rect.w = plane->dst.w - left->dst_rect.w;
+		right->dst_rect.x = left->dst_rect.x + left->dst_rect.w;
+	}
+
+	left->horz_deci = calculate_decimation(backend, left->src_rect.w,
+					       left->dst_rect.w);
+	left->vert_deci = calculate_decimation(backend, left->src_rect.h,
+					       left->dst_rect.h);
+
+	if (plane->right) {
+		right->horz_deci = calculate_decimation(backend,
+							right->src_rect.w,
+							right->dst_rect.w);
+		right->vert_deci = calculate_decimation(backend,
+							right->src_rect.h,
+							right->dst_rect.h);
+	}
+
+	dbg("config left layer=%x z=%d a=%d "
 	    "buffer=%u(%u)x%u "
 	    "src=%ux%u+%u+%u "
 	    "dst=%ux%u+%u+%u "
 	    "decimate=%ux%u\n",
-	    layer->pipe_ndx, plane->type,
-	    layer->z_order,
-	    layer->alpha,
-	    layer->buffer.width,
-	    layer->buffer.planes[0].stride, layer->buffer.height,
-	    layer->src_rect.w, layer->src_rect.h,
-	    layer->src_rect.x, layer->src_rect.y,
-	    layer->dst_rect.w, layer->dst_rect.h,
-	    layer->dst_rect.x, layer->dst_rect.y,
-	    layer->horz_deci, layer->vert_deci);
+	    left->pipe_ndx,
+	    left->z_order,
+	    left->alpha,
+	    left->buffer.width,
+	    left->buffer.planes[0].stride, left->buffer.height,
+	    left->src_rect.w, left->src_rect.h,
+	    left->src_rect.x, left->src_rect.y,
+	    left->dst_rect.w, left->dst_rect.h,
+	    left->dst_rect.x, left->dst_rect.y,
+	    left->horz_deci, left->vert_deci);
+
+	if (plane->right) {
+		dbg("config right layer=%x z=%d a=%d "
+		    "buffer=%u(%u)x%u "
+		    "src=%ux%u+%u+%u "
+		    "dst=%ux%u+%u+%u "
+		    "decimate=%ux%u\n",
+		    right->pipe_ndx,
+		    right->z_order,
+		    right->alpha,
+		    right->buffer.width,
+		    right->buffer.planes[0].stride, right->buffer.height,
+		    right->src_rect.w, right->src_rect.h,
+		    right->src_rect.x, right->src_rect.y,
+		    right->dst_rect.w, right->dst_rect.h,
+		    right->dst_rect.x, right->dst_rect.y,
+		    right->horz_deci, right->vert_deci);
+	}
+
+	return plane->right ? 2 : 1;
 }
 
 static int
@@ -550,13 +619,14 @@ qcom_output_commit(struct qcom_output *output)
 		if (!plane->next || plane->next->output != output)
 			continue;
 
-		fill_layer_config(backend, plane, &in_layers[num_layers]);
-		num_layers++;
+		num_layers += fill_layer_config(backend, plane,
+						&in_layers[num_layers],
+						&in_layers[num_layers + 1]);
 	}
 
-	plane = find_plane_type(backend, PIPE_TYPE_RGB);
+	plane = find_plane(backend);
 	if (!plane) {
-		weston_log("no available plane for framebuffer\n");
+		weston_log("no available plane framebuffer\n");
 	} else {
 		struct qcom_fb *fb;
 
@@ -572,8 +642,27 @@ qcom_output_commit(struct qcom_output *output)
 		plane->zorder = output->zorder;
 		plane->format = fb->format;
 		plane->blend_op = BLEND_OP_OPAQUE;
-		fill_layer_config(backend, plane, &in_layers[num_layers]);
-		num_layers++;
+
+		plane->left = find_pipe(backend, PIPE_TYPE_RGB);
+		if (!plane->left)
+			weston_log("no available rgb pipe for framebuffer "
+				   "left ROI\n");
+		else
+			backend->assigned_pipes |= plane->left->index;
+
+		if (plane->src.w <= backend->hwinfo.max_pipe_width &&
+		    plane->dst.w <= backend->hwinfo.max_pipe_width)
+			plane->right = NULL;
+		else {
+			plane->right = find_pipe(backend, PIPE_TYPE_RGB);
+			if (!plane->right)
+				weston_log("no available rgb pipe for "
+					   "framebuffer right ROI\n");
+		}
+
+		num_layers += fill_layer_config(backend, plane,
+						&in_layers[num_layers],
+						&in_layers[num_layers + 1]);
 	}
 
 	memset(&commit, 0, sizeof (commit));
@@ -639,6 +728,7 @@ qcom_output_repaint(struct weston_output *base, pixman_region32_t *damage)
 
 	/* reset output plane layout */
 	output->zorder = backend->hwinfo.n_blending_stages - 1;
+	backend->assigned_pipes = 0;
 
 	return 0;
 }
@@ -712,16 +802,15 @@ qcom_output_prepare_overlay_view(struct qcom_output *output,
 		return NULL;
 	}
 
-	// create fb for buffer
-	if ((dmabuf = linux_dmabuf_buffer_get(buffer_resource))) {
-		plane = find_plane_type(b, PIPE_TYPE_VIG);
-		if (!plane) {
-			dbg_continue(" -> no vig plane available\n");
-			return NULL;
-		}
-
-		fb = qcom_fb_get_from_dmabuf(b, dmabuf);
+	plane = find_plane(b);
+	if (!plane) {
+		dbg_continue(" -> no plane available\n");
+		return NULL;
 	}
+
+	// create fb for buffer
+	if ((dmabuf = linux_dmabuf_buffer_get(buffer_resource)))
+		fb = qcom_fb_get_from_dmabuf(b, dmabuf);
 
 	if (!fb) {
 		dbg_continue(" -> unhandled buffer type\n");
@@ -798,12 +887,6 @@ qcom_output_prepare_overlay_view(struct qcom_output *output,
 	dbg_continue(" . clipped to %ux%u+%u+%u\n",
 		     plane->dst.w, plane->dst.h, plane->dst.x, plane->dst.y);
 
-	// check clipped size is supported
-	if (plane->dst.w > b->hwinfo.max_pipe_width) {
-		dbg_continue(" -> surface size not supported by hw\n");
-		goto reject;
-	}
-
 	// check opaque region when using a pixel format with alpha
 	if (mdp_format_has_alpha(fb->format) &&
 	    pixman_region32_not_empty(&surface->opaque)) {
@@ -850,6 +933,7 @@ qcom_output_prepare_overlay_view(struct qcom_output *output,
 	plane->src.w = nearbyintf(sx2 - sx1);
 	plane->src.h = nearbyintf(sy2 - sy1);
 
+	// hardware does not support odd clipping to odd values
 	if (plane->src.x & 1)
 		plane->src.x--;
 	if (plane->src.y & 1)
@@ -879,6 +963,27 @@ qcom_output_prepare_overlay_view(struct qcom_output *output,
 			dbg_continue(" -> scaling factor not supported\n");
 			goto reject;
 		}
+	}
+
+	// find pipes for surface
+	plane->left = find_pipe(b, PIPE_TYPE_VIG);
+	if (!plane->left) {
+		dbg_continue(" -> no pipe available for left ROI\n");
+		goto reject;
+	}
+
+	b->assigned_pipes |= plane->left->index;
+
+	if (plane->src.w > b->hwinfo.max_pipe_width ||
+	    plane->dst.w > b->hwinfo.max_pipe_width) {
+		plane->right = find_pipe(b, PIPE_TYPE_VIG);
+		if (!plane->right) {
+			dbg_continue(" -> no pipe available for right ROI\n");
+			goto reject;
+		}
+		b->assigned_pipes |= plane->right->index;
+	} else {
+		plane->right = NULL;
 	}
 
 	plane->alpha = roundf(weston_view_get_alpha(view) * 255.0f);
@@ -1407,18 +1512,21 @@ qcom_plane_destroy(struct qcom_plane *plane)
 }
 
 static struct qcom_plane *
-qcom_plane_create(struct qcom_backend *backend, const struct qcom_hwpipe *pipe)
+qcom_plane_create(struct qcom_backend *backend)
 {
+	struct weston_compositor *compositor = backend->compositor;
+	struct weston_plane *last_plane;
 	struct qcom_plane *plane;
 
 	plane = zalloc(sizeof (*plane));
 	if (!plane)
 		return NULL;
 
-	weston_plane_init(&plane->base, backend->compositor, 0, 0);
+	last_plane = container_of(compositor->primary_plane.link.next,
+				  struct weston_plane, link);
 
-	plane->type = pipe->type;
-	plane->index = pipe->index;
+	weston_plane_init(&plane->base, compositor, 0, 0);
+	weston_compositor_stack_plane(compositor, &plane->base, last_plane);
 
 	wl_list_insert(&backend->plane_list, &plane->link);
 
@@ -1440,7 +1548,7 @@ parse_pipe_type(const char *s)
 }
 
 static int
-parse_mdp_pipe(char *line, struct qcom_hwpipe *pipe)
+parse_mdp_pipe(char *line, struct qcom_pipe *pipe)
 {
 	char *s, *token;
 	int type = -1;
@@ -1536,6 +1644,7 @@ qcom_init_hw_info(struct qcom_backend *backend)
 	const char *caps_path = SYSFS_MDP_DIR "/caps";
 	char line[128];
 	FILE *f;
+	int n_pipes = 0;
 
 	f = fopen(caps_path, "r");
 	if (f == NULL) {
@@ -1554,19 +1663,31 @@ qcom_init_hw_info(struct qcom_backend *backend)
 
 		line[len - 1] = '\0';
 
-		if (!strncmp(line, "pipe_num:", 9)) {
-			struct qcom_hwpipe pipe;
+		if (!strncmp(line, "pipe_count:", 11)) {
+			n_pipes = atoi(line + 11);
+			assert(n_pipes >= 0 && backend->n_pipes == 0);
+			backend->pipes = zalloc(n_pipes *
+						sizeof *backend->pipes);
 
-			if (parse_mdp_pipe(line, &pipe) < 0)
+		} else if (!strncmp(line, "pipe_num:", 9)) {
+			struct qcom_pipe *pipe;
+
+			assert(backend->n_pipes < n_pipes);
+			pipe = &backend->pipes[backend->n_pipes];
+
+			if (parse_mdp_pipe(line, pipe) < 0)
 				continue;
 
-			qcom_plane_create(backend, &pipe);
+			backend->n_pipes++;
 		} else {
 			parse_mdp_caps(line, &backend->hwinfo);
 		}
 	}
 
 	fclose(f);
+
+	if (n_pipes != backend->n_pipes)
+		weston_log("failed to parse some pipe definitions\n");
 
 	return 0;
 }
@@ -1651,6 +1772,9 @@ qcom_backend_create(struct weston_compositor *compositor,
 
 	if (qcom_init_hw_info(b) < 0)
 		goto err_input;
+
+	for (unsigned int i = 0; i < 16; i++)
+		qcom_plane_create(b);
 
 	if (qcom_output_create(b, config->device) < 0)
 		goto err_input;
