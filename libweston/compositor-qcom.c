@@ -91,13 +91,8 @@ struct qcom_screeninfo {
 	unsigned int width_mm; /* visible screen width in mm */
 	unsigned int height_mm; /* visible screen height in mm */
 	unsigned int bits_per_pixel;
-
-	size_t buffer_length; /* length of frame buffer memory in bytes */
-	size_t line_length; /* length of a line in bytes */
-	char id[16]; /* screen identifier */
-
-	pixman_format_code_t pixel_format; /* frame buffer pixel format */
 	unsigned int refresh_rate; /* Hertz */
+	char id[16]; /* screen identifier */
 };
 
 struct qcom_output {
@@ -977,93 +972,6 @@ fail:
 	goto ion_free;
 }
 
-static pixman_format_code_t
-calculate_pixman_format(struct fb_var_screeninfo *vinfo,
-                        struct fb_fix_screeninfo *finfo)
-{
-	/* Calculate the pixman format supported by the frame buffer from the
-	 * buffer's metadata. Return 0 if no known pixman format is supported
-	 * (since this has depth 0 it's guaranteed to not conflict with any
-	 * actual pixman format).
-	 *
-	 * Documentation on the vinfo and finfo structures:
-	 *    http://www.mjmwired.net/kernel/Documentation/fb/api.txt
-	 *
-	 * TODO: Try a bit harder to support other formats, including setting
-	 * the preferred format in the hardware. */
-	int type;
-
-	weston_log("Calculating pixman format from:\n"
-	           STAMP_SPACE " - type: %i (aux: %i)\n"
-	           STAMP_SPACE " - visual: %i\n"
-	           STAMP_SPACE " - bpp: %i (grayscale: %i)\n"
-	           STAMP_SPACE " - red: offset: %i, length: %i, MSB: %i\n"
-	           STAMP_SPACE " - green: offset: %i, length: %i, MSB: %i\n"
-	           STAMP_SPACE " - blue: offset: %i, length: %i, MSB: %i\n"
-	           STAMP_SPACE " - transp: offset: %i, length: %i, MSB: %i\n",
-	           finfo->type, finfo->type_aux, finfo->visual,
-	           vinfo->bits_per_pixel, vinfo->grayscale,
-	           vinfo->red.offset, vinfo->red.length, vinfo->red.msb_right,
-	           vinfo->green.offset, vinfo->green.length,
-	           vinfo->green.msb_right,
-	           vinfo->blue.offset, vinfo->blue.length,
-	           vinfo->blue.msb_right,
-	           vinfo->transp.offset, vinfo->transp.length,
-	           vinfo->transp.msb_right);
-
-	/* We only handle packed formats at the moment. */
-	if (finfo->type != FB_TYPE_PACKED_PIXELS)
-		return 0;
-
-	/* We only handle true-colour frame buffers at the moment. */
-	switch (finfo->visual) {
-		case FB_VISUAL_TRUECOLOR:
-		case FB_VISUAL_DIRECTCOLOR:
-			if (vinfo->grayscale != 0)
-				return 0;
-		break;
-		default:
-			return 0;
-	}
-
-	/* We only support formats with MSBs on the left. */
-	if (vinfo->red.msb_right != 0 || vinfo->green.msb_right != 0 ||
-	    vinfo->blue.msb_right != 0)
-		return 0;
-
-	/* Work out the format type from the offsets. We only support RGBA and
-	 * ARGB at the moment. */
-	type = PIXMAN_TYPE_OTHER;
-
-	if ((vinfo->transp.offset >= vinfo->red.offset ||
-	     vinfo->transp.length == 0) &&
-	    vinfo->red.offset >= vinfo->green.offset &&
-	    vinfo->green.offset >= vinfo->blue.offset)
-		type = PIXMAN_TYPE_ARGB;
-	else if (vinfo->red.offset >= vinfo->green.offset &&
-	         vinfo->green.offset >= vinfo->blue.offset &&
-	         vinfo->blue.offset >= vinfo->transp.offset)
-		type = PIXMAN_TYPE_RGBA;
-	else if (vinfo->transp.offset >= vinfo->blue.offset &&
-		 vinfo->blue.offset >= vinfo->green.offset &&
-		 vinfo->green.offset >= vinfo->red.offset)
-		type = PIXMAN_TYPE_ABGR;
-	else if (vinfo->blue.offset >= vinfo->green.offset &&
-		 vinfo->green.offset >= vinfo->red.offset &&
-		 vinfo->red.offset >= vinfo->transp.offset)
-		type = PIXMAN_TYPE_BGRA;
-
-	if (type == PIXMAN_TYPE_OTHER)
-		return 0;
-
-	/* Build the format. */
-	return PIXMAN_FORMAT(vinfo->bits_per_pixel, type,
-	                     vinfo->transp.length,
-	                     vinfo->red.length,
-	                     vinfo->green.length,
-	                     vinfo->blue.length);
-}
-
 static int
 qcom_query_refresh_rate(int fd)
 {
@@ -1104,18 +1012,9 @@ qcom_query_screen_info(struct qcom_output *output, int fd,
 	}
 
 	info->bits_per_pixel = varinfo.bits_per_pixel;
-	info->buffer_length = fixinfo.smem_len;
-	info->line_length = fixinfo.line_length;
 	strncpy(info->id, fixinfo.id, sizeof(info->id));
 	info->id[sizeof(info->id)-1] = '\0';
-
-	info->pixel_format = calculate_pixman_format(&varinfo, &fixinfo);
 	info->refresh_rate = qcom_query_refresh_rate(fd);
-
-	if (info->pixel_format == 0) {
-		weston_log("frame buffer uses an unsupported format\n");
-		return -1;
-	}
 
 	return 1;
 }
