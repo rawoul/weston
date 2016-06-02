@@ -14,6 +14,7 @@
 #include <linux/msm_ion.h>
 #include <linux/msm_mdp.h>
 #include <linux/msm_mdp_ext.h>
+#include <linux/sync.h>
 #include <linux/videodev2.h>
 
 #include <drm_fourcc.h>
@@ -40,6 +41,8 @@
 #define MDP_INVALID_FORMAT MDP_IMGTYPE_LIMIT2
 
 #define SYSFS_MDP_DIR	"/sys/devices/soc/900000.qcom,mdss_mdp"
+
+struct qcom_fence;
 
 struct qcom_hwpipe {
 	uint32_t index;
@@ -73,7 +76,17 @@ struct qcom_backend {
 	struct wl_list plane_list;
 };
 
+typedef void (*qcom_fence_cb_t)(struct qcom_fence *fence, void *data);
+
+struct qcom_fence {
+	int fd;
+	struct wl_event_source *event;
+	qcom_fence_cb_t sync_handler;
+	void *data;
+};
+
 struct qcom_fb {
+	struct qcom_output *output;
 	int fd;
 	int offset;
 	int width;
@@ -113,6 +126,8 @@ struct qcom_output {
 	int current_fb;
 	int zorder;
 
+	struct qcom_fence *current_fence, *next_fence;
+
 	pixman_region32_t previous_damage;
 };
 
@@ -133,6 +148,9 @@ struct qcom_plane {
 
 static int qcom_fbdev_vsync_on(struct qcom_output *output);
 static int qcom_fbdev_vsync_off(struct qcom_output *output);
+
+static void qcom_output_release_fb(struct qcom_output *output,
+				   struct qcom_fb *fb);
 
 static void qcom_fb_destroy(struct qcom_fb *fb);
 static struct qcom_fb *qcom_fb_get_from_dmabuf(struct qcom_backend *backend,
@@ -351,6 +369,108 @@ mdp_format_without_alpha(uint32_t format)
 	}
 }
 
+static void
+qcom_fence_destroy(struct qcom_fence *fence)
+{
+	if (!fence)
+		return;
+
+	wl_event_source_remove(fence->event);
+
+	if (close(fence->fd) < 0)
+		weston_log("failed to close fence: %m\n");
+
+	free(fence);
+}
+
+static int
+fence_handler(int fd, uint32_t mask, void *data)
+{
+	struct qcom_fence *fence = data;
+#if 0
+	char buf[4096];
+	struct sync_fence_info_data *info;
+	struct sync_pt_info *pt;
+	struct timespec ts;
+
+	memset(buf, 0, sizeof (buf));
+	info = (struct sync_fence_info_data *)buf;
+	info->len = sizeof (buf);
+
+	if (ioctl(fence->fd, SYNC_IOC_FENCE_INFO, info) < 0) {
+		weston_log("failed to read fence info: %m\n");
+		return -1;
+	}
+
+	pt = (struct sync_pt_info *)info->pt_info;
+	while ((uint8_t *)pt - (uint8_t *)info < (ptrdiff_t)info->len) {
+		ts->tv_sec = pt->timestamp_ns / 1000000000;
+		ts->tv_nsec = pt->timestamp_ns % 1000000000;
+		pt = (struct sync_pt_info *)(uint8_t *)pt + pt->len;
+	}
+#endif
+
+	fence->sync_handler(fence, fence->data);
+
+	return 0;
+}
+
+static struct qcom_fence *
+qcom_fence_create(struct qcom_backend *backend, int fd,
+		  qcom_fence_cb_t sync_handler, void *data)
+{
+	struct qcom_fence *fence;
+	struct wl_event_loop *loop;
+
+	if (!sync_handler)
+		return NULL;
+
+	fence = zalloc(sizeof *fence);
+	if (!fence)
+		return NULL;
+
+	loop = wl_display_get_event_loop(backend->compositor->wl_display);
+	fence->event = wl_event_loop_add_fd(loop, fd, WL_EVENT_READABLE,
+					    fence_handler, fence);
+
+	if (!fence->event)
+		goto fail;
+
+	fence->fd = fd;
+	fence->sync_handler = sync_handler;
+	fence->data = data;
+
+	return fence;
+
+fail:
+	free(fence);
+	return NULL;
+}
+
+static void
+output_release_fence_handler(struct qcom_fence *fence, void *data)
+{
+	struct qcom_output *output = data;
+	struct qcom_plane *plane;
+
+	assert(fence == output->current_fence);
+
+	wl_list_for_each(plane, &output->backend->plane_list, link) {
+		if (!plane->current)
+			continue;
+
+		if (plane->current->output != output)
+			continue;
+
+		qcom_output_release_fb(output, plane->current);
+		plane->current = NULL;
+	}
+
+	qcom_fence_destroy(fence);
+
+	output->current_fence = NULL;
+}
+
 static uint8_t
 calculate_decimation(struct qcom_backend *backend, uint32_t src, uint32_t dst)
 {
@@ -419,6 +539,7 @@ qcom_output_commit(struct qcom_output *output)
 {
 	struct qcom_backend *backend = output->backend;
 	struct qcom_plane *plane;
+	struct qcom_fence *fence;
 	struct mdp_input_layer in_layers[8];
 	struct mdp_layer_commit commit;
 	int num_layers = 0;
@@ -426,7 +547,7 @@ qcom_output_commit(struct qcom_output *output)
 	memset(in_layers, 0, sizeof (in_layers));
 
 	wl_list_for_each(plane, &backend->plane_list, link) {
-		if (!plane->next)
+		if (!plane->next || plane->next->output != output)
 			continue;
 
 		fill_layer_config(backend, plane, &in_layers[num_layers]);
@@ -468,8 +589,14 @@ qcom_output_commit(struct qcom_output *output)
 		return -1;
 	}
 
-	if (commit.commit_v1.release_fence != -1)
-		close(commit.commit_v1.release_fence);
+	fence = qcom_fence_create(backend, commit.commit_v1.release_fence,
+				  output_release_fence_handler, output);
+	if (!fence)
+		weston_log("failed to wrap release fence\n");
+	else if (!output->next_fence)
+		output->next_fence = fence;
+	else
+		weston_log("fence already in progress ?!\n");
 
 	if (commit.commit_v1.retire_fence != -1)
 		close(commit.commit_v1.retire_fence);
@@ -529,8 +656,14 @@ finish_frame_handler(int fd, uint32_t mask, void *data)
 	if (qcom_output_get_vsync_ts(output, &ts) < 0)
 		return 0;
 
+	if (!output->next_fence || output->current_fence)
+		return 0;
+
+	output->current_fence = output->next_fence;
+	output->next_fence = NULL;
+
 	wl_list_for_each(plane, &output->backend->plane_list, link) {
-		if (plane->next) {
+		if (plane->next && plane->next->output == output) {
 			plane->current = plane->next;
 			plane->next = NULL;
 		}
@@ -752,6 +885,8 @@ qcom_output_prepare_overlay_view(struct qcom_output *output,
 	plane->zorder = output->zorder--;
 	plane->next = fb;
 
+	fb->output = output;
+
 	return &plane->base;
 
 offscreen:
@@ -911,8 +1046,9 @@ qcom_fb_get_from_dmabuf(struct qcom_backend *backend,
 }
 
 static struct qcom_fb *
-qcom_fb_create(struct qcom_backend *backend, int width, int height)
+qcom_output_create_fb(struct qcom_output *output, int width, int height)
 {
+	struct qcom_backend *backend = output->backend;
 	struct qcom_fb *fb;
 	struct ion_allocation_data ion_alloc;
 	struct ion_fd_data ion_fd;
@@ -922,6 +1058,7 @@ qcom_fb_create(struct qcom_backend *backend, int width, int height)
 	if (!fb)
 		return NULL;
 
+	fb->output = output;
 	fb->width = width;
 	fb->height = height;
 	fb->format = MDP_BGRA_8888;
@@ -970,6 +1107,16 @@ fail:
 	qcom_fb_destroy(fb);
 	fb = NULL;
 	goto ion_free;
+}
+
+static void
+qcom_output_release_fb(struct qcom_output *output, struct qcom_fb *fb)
+{
+	for (unsigned i = 0; i < ARRAY_LENGTH(output->fb); i++)
+		if (fb == output->fb[i])
+			return;
+
+	qcom_fb_destroy(fb);
 }
 
 static int
@@ -1024,6 +1171,8 @@ qcom_fbdev_destroy(struct qcom_output *output)
 {
 	weston_log("destroying fbdev frame buffer.\n");
 
+	qcom_fence_destroy(output->current_fence);
+	qcom_fence_destroy(output->next_fence);
 	qcom_fbdev_vsync_off(output);
 
 	if (close(output->fd) < 0)
@@ -1122,7 +1271,7 @@ qcom_output_init_pixman(struct qcom_output *output)
 	int h = output->base.current_mode->height;
 
 	for (unsigned i = 0; i < ARRAY_LENGTH(output->fb); i++) {
-		output->fb[i] = qcom_fb_create(output->backend, w, h);
+		output->fb[i] = qcom_output_create_fb(output, w, h);
 		if (!output->fb[i])
 			goto fail;
 
