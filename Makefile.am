@@ -163,8 +163,8 @@ nodist_libweston_@LIBWESTON_MAJOR@_la_SOURCES =				\
 	protocol/weston-screenshooter-server-protocol.h			\
 	protocol/text-cursor-position-protocol.c	\
 	protocol/text-cursor-position-server-protocol.h	\
-	protocol/text-input-unstable-v1-protocol.c			\
-	protocol/text-input-unstable-v1-server-protocol.h		\
+	protocol/text-input-unstable-v2-protocol.c			\
+	protocol/text-input-unstable-v2-server-protocol.h		\
 	protocol/input-method-unstable-v1-protocol.c			\
 	protocol/input-method-unstable-v1-server-protocol.h		\
 	protocol/presentation-time-protocol.c		\
