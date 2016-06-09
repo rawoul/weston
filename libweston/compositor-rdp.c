@@ -699,7 +699,8 @@ rdp_peer_context_free(freerdp_peer* client, RdpPeerContext* context)
 	}
 
 	if (context->item.flags & RDP_PEER_ACTIVATED) {
-		weston_seat_release_keyboard(context->item.seat);
+		weston_seat_release_keyboard(context->item.seat,
+					     WESTON_KEYBOARD_DEFAULT);
 		weston_seat_release_pointer(context->item.seat);
 		/* XXX we should weston_seat_release(context->item.seat); here
 		 * but it would crash on reconnect */
@@ -979,7 +980,8 @@ xf_peer_activate(freerdp_peer* client)
 	}
 
 	weston_seat_init(peersItem->seat, b->compositor, seat_name);
-	weston_seat_init_keyboard(peersItem->seat, keymap);
+	weston_seat_init_keyboard(peersItem->seat, keymap,
+				  WESTON_KEYBOARD_DEFAULT);
 	weston_seat_init_pointer(peersItem->seat);
 
 	peersItem->flags |= RDP_PEER_ACTIVATED;

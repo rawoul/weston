@@ -232,7 +232,7 @@ if test x$enable_drm_compositor = xyes; then
 fi
 
 
-PKG_CHECK_MODULES(LIBINPUT_BACKEND, [libinput >= 0.8.0 mtdev >= 1.1.0],
+PKG_CHECK_MODULES(LIBINPUT_BACKEND, [libinput >= 0.15.0 mtdev >= 1.1.0],
 		  [have_libinput="yes"], [have_libinput="no"])
 PKG_CHECK_MODULES(COMPOSITOR, [$COMPOSITOR_MODULES])
 

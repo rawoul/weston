@@ -2895,13 +2895,20 @@ weston_seat_update_keymap(struct weston_seat *seat, struct xkb_keymap *keymap)
 }
 
 WL_EXPORT int
-weston_seat_init_keyboard(struct weston_seat *seat, struct xkb_keymap *keymap)
+weston_seat_init_keyboard(struct weston_seat *seat, struct xkb_keymap *keymap,
+			  uint32_t caps)
 {
 	struct weston_keyboard *keyboard;
 
 	if (seat->keyboard_state) {
 		seat->keyboard_device_count += 1;
-		if (seat->keyboard_device_count == 1)
+		if (caps & WESTON_KEYBOARD_LETTERS)
+			seat->keyboard_state->caps_letters_count += 1;
+		if (caps & WESTON_KEYBOARD_DIGITS)
+			seat->keyboard_state->caps_digits_count += 1;
+		if (seat->keyboard_device_count == 1 ||
+		    seat->keyboard_state->caps_letters_count == 1 ||
+		    seat->keyboard_state->caps_digits_count == 1)
 			seat_send_updated_caps(seat);
 		return 0;
 	}
@@ -2939,6 +2946,11 @@ weston_seat_init_keyboard(struct weston_seat *seat, struct xkb_keymap *keymap)
 	seat->keyboard_device_count = 1;
 	keyboard->seat = seat;
 
+	if (caps & WESTON_KEYBOARD_LETTERS)
+		keyboard->caps_letters_count = 1;
+	if (caps & WESTON_KEYBOARD_DIGITS)
+		keyboard->caps_digits_count = 1;
+
 	seat_send_updated_caps(seat);
 
 	return 0;
@@ -2975,16 +2987,37 @@ weston_keyboard_reset_state(struct weston_keyboard *keyboard)
 }
 
 WL_EXPORT void
-weston_seat_release_keyboard(struct weston_seat *seat)
+weston_seat_release_keyboard(struct weston_seat *seat, uint32_t caps)
 {
+	struct weston_keyboard *keyboard = seat->keyboard_state;
+	bool update_caps = false;
+
+	if (caps & WESTON_KEYBOARD_LETTERS) {
+		keyboard->caps_letters_count--;
+		update_caps = true;
+	}
+
+	if (caps & WESTON_KEYBOARD_DIGITS) {
+		keyboard->caps_digits_count--;
+		update_caps = true;
+	}
+
+	assert(keyboard->caps_letters_count >= 0 &&
+	       keyboard->caps_digits_count >= 0);
+
 	seat->keyboard_device_count--;
 	assert(seat->keyboard_device_count >= 0);
 	if (seat->keyboard_device_count == 0) {
+		assert(keyboard->caps_letters_count == 0 &&
+		       keyboard->caps_digits_count == 0);
 		weston_keyboard_set_focus(seat->keyboard_state, NULL);
 		weston_keyboard_cancel_grab(seat->keyboard_state);
 		weston_keyboard_reset_state(seat->keyboard_state);
-		seat_send_updated_caps(seat);
+		update_caps = true;
 	}
+
+	if (update_caps)
+		seat_send_updated_caps(seat);
 }
 
 WL_EXPORT void

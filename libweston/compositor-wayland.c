@@ -1672,7 +1672,8 @@ input_handle_keymap(void *data, struct wl_keyboard *keyboard, uint32_t format,
 	if (weston_seat_get_keyboard(&input->base))
 		weston_seat_update_keymap(&input->base, keymap);
 	else
-		weston_seat_init_keyboard(&input->base, keymap);
+		weston_seat_init_keyboard(&input->base, keymap,
+					  WESTON_KEYBOARD_DEFAULT);
 
 	xkb_keymap_unref(keymap);
 
@@ -1984,7 +1985,8 @@ input_handle_capabilities(void *data, struct wl_seat *seat,
 		else
 			wl_keyboard_destroy(input->parent.keyboard);
 		input->parent.keyboard = NULL;
-		weston_seat_release_keyboard(&input->base);
+		weston_seat_release_keyboard(&input->base,
+					     WESTON_KEYBOARD_DEFAULT);
 	}
 
 	if ((caps & WL_SEAT_CAPABILITY_TOUCH) && !input->parent.touch) {

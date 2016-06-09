@@ -227,7 +227,8 @@ ss_seat_handle_keymap(void *data, struct wl_keyboard *wl_keyboard,
 	if (seat->base.keyboard_device_count)
 		weston_seat_update_keymap(&seat->base, keymap);
 	else
-		weston_seat_init_keyboard(&seat->base, keymap);
+		weston_seat_init_keyboard(&seat->base, keymap,
+					  WESTON_KEYBOARD_DEFAULT);
 
 	xkb_keymap_unref(keymap);
 

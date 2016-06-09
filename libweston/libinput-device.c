@@ -534,6 +534,35 @@ evdev_device_set_output(struct evdev_device *device,
 	evdev_device_set_calibration(device);
 }
 
+static enum weston_keyboard_caps
+keyboard_caps(struct libinput_device *dev)
+{
+	bool letters = true, digits = true;
+	uint32_t alpha_keys[] = {
+		KEY_A, KEY_B, KEY_C, KEY_D, KEY_E, KEY_F,
+		KEY_G, KEY_H, KEY_I, KEY_J, KEY_K, KEY_L,
+		KEY_M, KEY_N, KEY_O, KEY_P, KEY_Q, KEY_R,
+		KEY_S, KEY_T, KEY_U, KEY_V, KEY_W, KEY_X,
+		KEY_Y, KEY_Z, KEY_RESERVED
+	};
+	uint32_t digit_keys[] = {
+		KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6,
+		KEY_7, KEY_8, KEY_9, KEY_0, KEY_RESERVED
+	};
+	int i;
+
+	for (i = 0; letters && alpha_keys[i] != KEY_RESERVED; i++)
+		letters &= libinput_device_keyboard_has_key(dev,
+							    alpha_keys[i]);
+
+	for (i = 0; digits && digit_keys[i] != KEY_RESERVED; i++)
+		digits &= libinput_device_keyboard_has_key(dev,
+							   digit_keys[i]);
+
+	return (letters ? WESTON_KEYBOARD_LETTERS : 0) |
+		(digits ? WESTON_KEYBOARD_DIGITS : 0);
+}
+
 struct evdev_device *
 evdev_device_create(struct libinput_device *libinput_device,
 		    struct weston_seat *seat)
@@ -550,7 +579,8 @@ evdev_device_create(struct libinput_device *libinput_device,
 
 	if (libinput_device_has_capability(libinput_device,
 					   LIBINPUT_DEVICE_CAP_KEYBOARD)) {
-		weston_seat_init_keyboard(seat, NULL);
+		weston_seat_init_keyboard(seat, NULL,
+					  keyboard_caps(libinput_device));
 		device->seat_caps |= EVDEV_SEAT_KEYBOARD;
 	}
 	if (libinput_device_has_capability(libinput_device,
@@ -576,7 +606,8 @@ evdev_device_destroy(struct evdev_device *device)
 	if (device->seat_caps & EVDEV_SEAT_POINTER)
 		weston_seat_release_pointer(device->seat);
 	if (device->seat_caps & EVDEV_SEAT_KEYBOARD)
-		weston_seat_release_keyboard(device->seat);
+		weston_seat_release_keyboard(device->seat,
+					     keyboard_caps(device->device));
 	if (device->seat_caps & EVDEV_SEAT_TOUCH)
 		weston_seat_release_touch(device->seat);
 

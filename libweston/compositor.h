@@ -87,6 +87,13 @@ enum weston_keyboard_locks {
 	WESTON_CAPS_LOCK = (1 << 1),
 };
 
+enum weston_keyboard_caps {
+	WESTON_KEYBOARD_LETTERS = (1 << 0),
+	WESTON_KEYBOARD_DIGITS = (1 << 1),
+	WESTON_KEYBOARD_DEFAULT =
+		(WESTON_KEYBOARD_LETTERS | WESTON_KEYBOARD_DIGITS),
+};
+
 enum weston_led {
 	LED_NUM_LOCK = (1 << 0),
 	LED_CAPS_LOCK = (1 << 1),
@@ -586,6 +593,9 @@ struct weston_keyboard {
 		enum weston_led leds;
 	} xkb_state;
 	struct xkb_keymap *pending_keymap;
+
+	int caps_letters_count;
+	int caps_digits_count;
 };
 
 struct weston_seat {
@@ -1639,9 +1649,10 @@ weston_seat_init_pointer(struct weston_seat *seat);
 void
 weston_seat_release_pointer(struct weston_seat *seat);
 int
-weston_seat_init_keyboard(struct weston_seat *seat, struct xkb_keymap *keymap);
+weston_seat_init_keyboard(struct weston_seat *seat, struct xkb_keymap *keymap,
+			  uint32_t caps);
 void
-weston_seat_release_keyboard(struct weston_seat *seat);
+weston_seat_release_keyboard(struct weston_seat *seat, uint32_t caps);
 void
 weston_seat_init_touch(struct weston_seat *seat);
 void

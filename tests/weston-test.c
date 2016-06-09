@@ -216,7 +216,7 @@ device_release(struct wl_client *client,
 	if (strcmp(device, "pointer") == 0) {
 		weston_seat_release_pointer(seat);
 	} else if (strcmp(device, "keyboard") == 0) {
-		weston_seat_release_keyboard(seat);
+		weston_seat_release_keyboard(seat, WESTON_KEYBOARD_DEFAULT);
 	} else if (strcmp(device, "touch") == 0) {
 		weston_seat_release_touch(seat);
 	} else if (strcmp(device, "seat") == 0) {
@@ -236,7 +236,7 @@ device_add(struct wl_client *client,
 	if (strcmp(device, "pointer") == 0) {
 		weston_seat_init_pointer(seat);
 	} else if (strcmp(device, "keyboard") == 0) {
-		weston_seat_init_keyboard(seat, NULL);
+		weston_seat_init_keyboard(seat, NULL, WESTON_KEYBOARD_DEFAULT);
 	} else if (strcmp(device, "touch") == 0) {
 		weston_seat_init_touch(seat);
 	} else {
@@ -607,7 +607,8 @@ module_init(struct weston_compositor *ec,
 
 	/* add devices */
 	weston_seat_init_pointer(&test->seat);
-	if (weston_seat_init_keyboard(&test->seat, NULL) < 0)
+	if (weston_seat_init_keyboard(&test->seat, NULL,
+				      WESTON_KEYBOARD_DEFAULT) < 0)
 		return -1;
 	weston_seat_init_touch(&test->seat);
 

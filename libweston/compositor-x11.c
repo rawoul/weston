@@ -363,7 +363,8 @@ x11_input_create(struct x11_backend *b, int no_input)
 	weston_seat_init_pointer(&b->core_seat);
 
 	keymap = x11_backend_get_keymap(b);
-	if (weston_seat_init_keyboard(&b->core_seat, keymap) < 0)
+	if (weston_seat_init_keyboard(&b->core_seat, keymap,
+				      WESTON_KEYBOARD_DEFAULT) < 0)
 		return -1;
 	xkb_keymap_unref(keymap);
 

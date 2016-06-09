@@ -44,8 +44,8 @@ enum konami_code_state {
 };
 
 enum wlh_device_usage {
-	WLH_USAGE_KEYBOARD = (1 << 0),
-	WLH_USAGE_POINTER = (1 << 1),
+	WLH_USAGE_KEYBOARD 		= 1 << 0,
+	WLH_USAGE_POINTER		= 1 << 1,
 };
 
 enum wlh_event_type {
@@ -105,6 +105,7 @@ struct wlh_device {
 	struct lh_device *lh_device;
 
 	uint32_t usage;
+	uint32_t keyboard_caps;
 
 	enum wlh_event_type pending_event;
 
@@ -368,7 +369,7 @@ wlh_gamepad_destroy(struct wlh_gamepad *pad)
 	lhs_mapping_deinit(&pad->mapping);
 	ela_source_free(pad->input->loop, pad->motion_source);
 
-	weston_seat_release_keyboard(&pad->seat->base);
+	weston_seat_release_keyboard(&pad->seat->base, 0);
 	weston_seat_release_pointer(&pad->seat->base);
 
 	free(pad);
@@ -542,7 +543,7 @@ register_gamepad(struct input_lh *input, struct input_lh_seat *seat,
 	ela_set_timeout(input->loop, pad->motion_source, &motion_interval, 0);
 
 	/* FIXME: only expose pointer when axis can be mapped */
-	weston_seat_init_keyboard(&pad->seat->base, NULL);
+	weston_seat_init_keyboard(&pad->seat->base, NULL, 0);
 	weston_seat_init_pointer(&pad->seat->base);
 
 	return pad;
@@ -561,7 +562,8 @@ wlh_device_remove_usage(struct wlh_device *device, uint32_t usage)
 
 	if (usage & WLH_USAGE_KEYBOARD) {
 		lhs_usage_extractor_deinit(&device->usage_extractor);
-		weston_seat_release_keyboard(&device->seat->base);
+		weston_seat_release_keyboard(&device->seat->base,
+					     device->keyboard_caps);
 		device->usage &= ~WLH_USAGE_KEYBOARD;
 	}
 
@@ -981,6 +983,32 @@ wlh_device_release_pointer(struct wlh_device *device)
 	weston_seat_release_pointer(&device->seat->base);
 }
 
+static bool
+wlh_device_has_keyboard_page(struct wlh_device *device)
+{
+	const struct lhid_descriptor *desc;
+	const struct lhid_report_desc *report;
+	const struct lhid_item *item;
+	size_t i, j;
+
+	desc = lh_device_descriptor_get(device->lh_device);
+
+	for (i = 0; i < desc->way[LHID_REPORT_INPUT].desc_count; i++) {
+		report = &desc->way[LHID_REPORT_INPUT].desc[i];
+		for (j = 0; j < report->item_count; j++) {
+			item = &report->item[j];
+
+			if (lhid_item_is_constant(item->flags))
+				continue;
+
+			if ((item->usage >> 16) == LHID_UT_KEYBOARD)
+				return true;
+		}
+	}
+
+	return false;
+}
+
 static struct wlh_device *
 register_device(struct input_lh *input, struct input_lh_seat *seat,
 		struct lh_device *lh_device)
@@ -999,16 +1027,18 @@ register_device(struct input_lh *input, struct input_lh_seat *seat,
 	device->lh_device = lh_device;
 	device->pending_event = WLH_EVENT_NONE;
 
+	info = lh_device_info_get(lh_device);
+
 	/* register keyboard related reports */
 	if (!lhs_usage_extractor_init(&device->usage_extractor,
 				      &keyboard_ue_handler,
-				      device->lh_device))
+				      lh_device))
 		device->usage |= WLH_USAGE_KEYBOARD;
 
 	/* register pointer related reports */
 	wl_list_init(&device->pointer_report_list);
 
-	desc = lh_device_descriptor_get(device->lh_device);
+	desc = lh_device_descriptor_get(lh_device);
 	for (i = 0; i < desc->way[LHID_REPORT_INPUT].desc_count; i++) {
 		const struct lhid_report_desc *rd =
 			&desc->way[LHID_REPORT_INPUT].desc[i];
@@ -1025,13 +1055,28 @@ register_device(struct input_lh *input, struct input_lh_seat *seat,
 		return NULL;
 	}
 
-	/* register device in weston */
-	if (device->usage & WLH_USAGE_KEYBOARD)
-		weston_seat_init_keyboard(&device->seat->base, NULL);
+	/* register keyboard in weston */
+	if (device->usage & WLH_USAGE_KEYBOARD) {
+		if (wlh_device_has_keyboard_page(device)) {
+			switch (info->bus) {
+			case LH_BUS_IR:
+			case LH_BUS_CEC:
+			case LH_BUS_RTI:
+				device->keyboard_caps = WESTON_KEYBOARD_DIGITS;
+				break;
+			default:
+				device->keyboard_caps = WESTON_KEYBOARD_DIGITS |
+					WESTON_KEYBOARD_LETTERS;
+				break;
+			}
+		}
+
+		weston_seat_init_keyboard(&device->seat->base, NULL,
+					  device->keyboard_caps);
+	}
 
 	/* only grab remote controller pointer when actually
 	 * needed, to avoid using the battery too much */
-	info = lh_device_info_get(lh_device);
 	if (info->bus != LH_BUS_RTI || input->pointer_enabled)
 		wlh_device_grab_pointer(device);
 
