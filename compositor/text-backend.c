@@ -49,6 +49,7 @@ struct text_input {
 
 	struct weston_compositor *ec;
 	struct weston_seat *seat;
+	struct wl_listener seat_caps_listener;
 
 	struct wl_list input_methods;
 
@@ -147,10 +148,14 @@ static void
 text_input_update_input_panel_visibility(struct text_input *text_input)
 {
 	struct weston_compositor *ec = text_input->ec;
+	struct weston_keyboard *keyboard;
 	bool visible;
 
+	keyboard = weston_seat_get_keyboard(text_input->seat);
+
 	visible = text_input->input_panel_visible &&
-		text_input->manager->current_panel == text_input;
+		text_input->manager->current_panel == text_input &&
+		(!keyboard || keyboard->caps_letters_count == 0);
 
 	if (visible == text_input->input_panel_state.visible)
 		return;
@@ -210,6 +215,8 @@ destroy_text_input(struct wl_resource *resource)
 	wl_list_for_each_safe(input_method, next,
 			      &text_input->input_methods, link)
 		deactivate_input_method(input_method);
+
+	wl_list_remove(&text_input->seat_caps_listener.link);
 
 	free(text_input);
 }
@@ -415,6 +422,15 @@ static const struct zwp_text_input_v2_interface text_input_implementation = {
 };
 
 static void
+seat_caps_changed(struct wl_listener *listener, void *data)
+{
+	struct text_input *text_input =
+		container_of(listener, struct text_input, seat_caps_listener);
+
+	text_input_update_input_panel_visibility(text_input);
+}
+
+static void
 text_input_manager_destroy(struct wl_client *client,
 			   struct wl_resource *resource)
 {
@@ -444,6 +460,10 @@ text_input_manager_get_text_input(struct wl_client *client,
 	text_input->ec = text_input_manager->ec;
 	text_input->manager = text_input_manager;
 	text_input->seat = wl_resource_get_user_data(seat);
+
+	text_input->seat_caps_listener.notify = seat_caps_changed;
+	wl_signal_add(&text_input->seat->updated_caps_signal,
+		      &text_input->seat_caps_listener);
 
 	wl_list_init(&text_input->input_methods);
 }
