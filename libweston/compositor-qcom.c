@@ -91,7 +91,9 @@ struct qcom_fence {
 };
 
 struct qcom_fb {
+	struct qcom_backend *backend;
 	struct qcom_output *output;
+	int ion_handle;
 	int fd;
 	int offset;
 	int width;
@@ -159,6 +161,7 @@ static void qcom_output_release_fb(struct qcom_output *output,
 static void qcom_fb_destroy(struct qcom_fb *fb);
 static struct qcom_fb *qcom_fb_get_from_dmabuf(struct qcom_backend *backend,
 		const struct linux_dmabuf_buffer *dmabuf);
+static int qcom_fb_flush(struct qcom_fb *fb, pixman_region32_t *damage);
 static void qcom_fb_set_buffer(struct qcom_fb *fb,
 			       struct weston_buffer *buffer);
 
@@ -717,6 +720,8 @@ qcom_output_repaint(struct weston_output *base, pixman_region32_t *damage)
 				output->image[output->current_fb]);
 		ec->renderer->repaint_output(base, &total_damage);
 
+		qcom_fb_flush(output->fb[output->current_fb], &total_damage);
+
 		pixman_region32_fini(&total_damage);
 
 		pixman_region32_subtract(&ec->primary_plane.damage,
@@ -1104,9 +1109,70 @@ qcom_fb_destroy(struct qcom_fb *fb)
 			weston_log("failed to close fb: %m\n");
 	}
 
+	if (fb->ion_handle != -1) {
+		struct ion_handle_data ion_handle;
+
+		memset(&ion_handle, 0, sizeof (ion_handle));
+		ion_handle.handle = fb->ion_handle;
+
+		if (ioctl(fb->backend->ion_fd, ION_IOC_FREE, &ion_handle) < 0)
+			weston_log("failed to release ion buffer: %m\n");
+	}
+
 	weston_buffer_reference(&fb->buffer_ref, NULL);
 
 	free(fb);
+}
+
+static int
+qcom_fb_get_ion_handle(struct qcom_fb *fb)
+{
+	if (fb->ion_handle < 0 && fb->fd != -1) {
+		struct ion_fd_data ion_fd;
+
+		memset(&ion_fd, 0, sizeof (ion_fd));
+		ion_fd.fd = fb->fd;
+
+		if (ioctl(fb->backend->ion_fd, ION_IOC_IMPORT, &ion_fd) < 0)
+			weston_log("failed to import dma buffer: %m\n");
+		else
+			fb->ion_handle = ion_fd.handle;
+	}
+
+	return fb->ion_handle;
+}
+
+static int
+qcom_fb_flush(struct qcom_fb *fb, pixman_region32_t *damage)
+{
+	int ion_handle;
+	struct ion_flush_data ion_flush;
+
+	ion_handle = qcom_fb_get_ion_handle(fb);
+	if (ion_handle < 0)
+		return -1;
+
+	memset(&ion_flush, 0, sizeof (ion_flush));
+	ion_flush.handle = ion_handle;
+	ion_flush.vaddr = fb->data;
+
+	if (damage) {
+		pixman_box32_t *extents = pixman_region32_extents(damage);
+		ion_flush.offset = extents->y1 * fb->stride + extents->x1;
+		ion_flush.length = (extents->y2 - extents->y1 - 1) *
+			fb->stride + (extents->x2 - extents->x1);
+	} else {
+		ion_flush.offset = 0;
+		ion_flush.length = fb->height * fb->stride;
+	}
+
+	if (ioctl(fb->backend->ion_fd,
+		  ION_IOC_CLEAN_INV_CACHES, &ion_flush) < 0) {
+		weston_log("failed to flush ion buffer: %m\n");
+		return -1;
+	}
+
+	return 0;
 }
 
 static void
@@ -1140,6 +1206,8 @@ qcom_fb_get_from_dmabuf(struct qcom_backend *backend,
 	if (!fb)
 		return NULL;
 
+	fb->backend = backend;
+	fb->ion_handle = -1;
 	fb->fd = dmabuf->attributes.fd[0];
 	fb->offset = dmabuf->attributes.offset[0];
 	fb->width = dmabuf->attributes.width;
@@ -1157,24 +1225,25 @@ qcom_output_create_fb(struct qcom_output *output, int width, int height)
 	struct qcom_fb *fb;
 	struct ion_allocation_data ion_alloc;
 	struct ion_fd_data ion_fd;
-	struct ion_handle_data ion_handle;
 
 	fb = zalloc(sizeof *fb);
 	if (!fb)
 		return NULL;
 
+	fb->backend = backend;
 	fb->output = output;
 	fb->width = width;
 	fb->height = height;
 	fb->format = MDP_BGRA_8888;
 	fb->stride = width * 4;
+	fb->ion_handle = -1;
 	fb->fd = -1;
 
 	memset(&ion_alloc, 0, sizeof (ion_alloc));
 	ion_alloc.len = fb->stride * height;
 	ion_alloc.align = sysconf(_SC_PAGESIZE);
 	ion_alloc.heap_id_mask = ION_HEAP(ION_SYSTEM_HEAP_ID);
-	ion_alloc.flags = 0; //ION_FLAG_CACHED;
+	ion_alloc.flags = ION_FLAG_CACHED;
 
 	if (ioctl(backend->ion_fd, ION_IOC_ALLOC, &ion_alloc) < 0) {
 		weston_log("failed to allocate %dx%d ion buffer: %m\n",
@@ -1191,6 +1260,7 @@ qcom_output_create_fb(struct qcom_output *output, int width, int height)
 	}
 
 	fb->fd = ion_fd.fd;
+	fb->ion_handle = ion_fd.handle;
 
 	fb->data = mmap(0, ion_alloc.len, PROT_READ | PROT_WRITE, MAP_SHARED,
 			fb->fd, 0);
@@ -1199,19 +1269,11 @@ qcom_output_create_fb(struct qcom_output *output, int width, int height)
 		goto fail;
 	}
 
-ion_free:
-	memset(&ion_handle, 0, sizeof (ion_handle));
-	ion_handle.handle = ion_alloc.handle;
-
-	if (ioctl(backend->ion_fd, ION_IOC_FREE, &ion_handle) < 0)
-		weston_log("failed to release ion buffer: %m\n");
-
 	return fb;
 
 fail:
 	qcom_fb_destroy(fb);
-	fb = NULL;
-	goto ion_free;
+	return NULL;
 }
 
 static void
