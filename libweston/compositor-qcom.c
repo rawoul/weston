@@ -79,6 +79,10 @@ struct qcom_backend {
 	struct wl_list plane_list;
 
 	uint32_t assigned_pipes;
+
+	struct weston_layer background_layer;
+	struct weston_surface *background_surface;
+	struct weston_view *background_view;
 };
 
 typedef void (*qcom_fence_cb_t)(struct qcom_fence *fence, void *data);
@@ -1011,6 +1015,7 @@ qcom_output_assign_plane(struct qcom_output *output, struct weston_view *view,
 			 pixman_region32_t *composited_region)
 {
 	struct weston_compositor *ec = output->base.compositor;
+	struct qcom_backend *backend = qcom_backend(ec);
 	struct weston_plane *plane;
 	struct weston_plane *primary;
 	struct weston_surface *surface;
@@ -1018,12 +1023,12 @@ qcom_output_assign_plane(struct qcom_output *output, struct weston_view *view,
 
 	primary = &ec->primary_plane;
 
-#if 0
 	if (view->layer_link.layer == &backend->background_layer) {
 		// dummy layer to track composited framebuffer damage
 		return primary;
 	}
 
+#if 0
 	if (view->layer_link.layer == &ec->cursor_layer) {
 		if ((plane = ice_output_assign_cursor_view(output, view)))
 			return plane;
@@ -1796,6 +1801,42 @@ debug_binding(struct weston_keyboard *keyboard, uint32_t time, uint32_t key,
 	}
 }
 
+static int
+create_background(struct qcom_backend *b)
+{
+	struct weston_surface *surface;
+	struct weston_view *view;
+
+	surface = weston_surface_create(b->compositor);
+	if (!surface)
+		return -1;
+
+	view = weston_view_create(surface);
+	if (!view) {
+		weston_surface_destroy(surface);
+		return -1;
+	}
+
+	weston_surface_set_color(surface, 0, 0, 0, 0);
+	weston_surface_set_size(surface, 8192, 8192);
+	pixman_region32_init_rect(&surface->opaque, 0, 0, 8192, 8192);
+	pixman_region32_init(&surface->input);
+
+	weston_view_set_position(view, 0, 0);
+	view->surface->is_mapped = true;
+	view->is_mapped = true;
+
+	weston_layer_init(&b->background_layer,
+			  &b->compositor->cursor_layer.link);
+	weston_layer_entry_insert(&b->background_layer.view_list,
+				  &view->layer_link);
+
+	b->background_surface = surface;
+	b->background_view = view;
+
+	return 0;
+}
+
 static struct qcom_backend *
 qcom_backend_create(struct weston_compositor *compositor,
 		    struct weston_qcom_backend_config *config)
@@ -1824,6 +1865,11 @@ qcom_backend_create(struct weston_compositor *compositor,
 
 	if (pixman_renderer_init(compositor) < 0)
 		goto err_ion;
+
+	if (create_background(b) < 0) {
+		weston_log("failed to create background surface");
+		goto err_ion;
+	}
 
 	if (input_lh_init(&b->input, compositor) < 0) {
 		weston_log("failed to create input devices\n");
