@@ -149,6 +149,12 @@ if test x$enable_xkbcommon = xyes; then
 fi
 
 
+AC_ARG_ENABLE(lh-input,
+	      AS_HELP_STRING([--enable-lh-input],
+	                     [use liblh instead of libinput for some backends]),,
+	      enable_lh_input=no)
+AM_CONDITIONAL(ENABLE_LH_INPUT, test x$enable_lh_input = xyes)
+
 AC_ARG_ENABLE(lh-udp,
               AS_HELP_STRING([--enable-lh-udp],
                              [build the liblh based UDP hid server]),,
@@ -279,8 +285,14 @@ AC_ARG_ENABLE(qcom-compositor,
 AM_CONDITIONAL(ENABLE_QCOM_COMPOSITOR, test "x$enable_qcom_compositor" = "xyes")
 if test "x$enable_qcom_compositor" = "xyes"; then
   AC_DEFINE([BUILD_QCOM_COMPOSITOR], [1], [Build the compositor for Qualcomm SOC])
-  PKG_CHECK_MODULES(QCOM_COMPOSITOR, [libdrm])
-  need_liblh="yes"
+  QCOM_INPUT_MODULES=""
+  if test "x$enable_lh_input" = "xyes"; then
+    need_liblh="yes"
+  else
+    need_libinput="yes"
+    QCOM_INPUT_MODULES="$QCOM_INPUT_MODULES libudev >= 136"
+  fi
+  PKG_CHECK_MODULES(QCOM_COMPOSITOR, [libdrm $QCOM_INPUT_MODULES])
 fi
 
 
@@ -319,6 +331,9 @@ fi
 
 if test x$need_liblh = xyes; then
   LIBLH_MODULES="lh ela fbxevent fbxbus"
+  if test x$enable_lh_input = xyes; then
+    AC_DEFINE([ENABLE_LH_INPUT], [1], [Prefer liblh backend for input])
+  fi
   if test x$enable_lh_udp = xyes; then
     AC_DEFINE([ENABLE_LH_UDP], [1], [Build Weston with UDP HID server in the liblh input backend])
     LIBLH_MODULES="$LIBLH_MODULES fbxsystem fbxmdnssd"

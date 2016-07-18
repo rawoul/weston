@@ -365,6 +365,16 @@ LH_BACKEND_PROTOCOL_SOURCES =			\
 	protocol/fbx-gamepad-protocol.c		\
 	protocol/fbx-gamepad-server-protocol.h
 
+if ENABLE_LH_INPUT
+INPUT_LIBS = $(LH_BACKEND_LIBS)
+INPUT_CFLAGS = $(LH_BACKEND_CFLAGS)
+INPUT_SOURCES = $(LH_BACKEND_SOURCES)
+INPUT_NODIST_SOURCES = $(LH_BACKEND_PROTOCOL_SOURCES)
+else
+INPUT_LIBS = $(INPUT_BACKEND_LIBS)
+INPUT_SOURCES = $(INPUT_BACKEND_SOURCES)
+endif
+
 if ENABLE_DRM_COMPOSITOR
 libweston_module_LTLIBRARIES += drm-backend.la
 drm_backend_la_LDFLAGS = -module -avoid-version
@@ -487,19 +497,20 @@ qcom_backend_la_LDFLAGS = -module -avoid-version
 qcom_backend_la_LIBADD =			\
 	$(COMPOSITOR_LIBS)			\
 	$(QCOM_COMPOSITOR_LIBS)			\
-	$(LH_BACKEND_LIBS)			\
+	$(INPUT_LIBS)				\
+	libsession-helper.la			\
 	libshared.la
 qcom_backend_la_CFLAGS =			\
 	$(COMPOSITOR_CFLAGS)			\
 	$(QCOM_COMPOSITOR_CFLAGS)		\
 	$(PIXMAN_CFLAGS)			\
-	$(LH_BACKEND_CFLAGS)			\
+	$(INPUT_CFLAGS)				\
 	$(AM_CFLAGS)
 qcom_backend_la_SOURCES =			\
 	libweston/compositor-qcom.c		\
-	$(LH_BACKEND_SOURCES)
+	$(INPUT_SOURCES)
 nodist_qcom_backend_la_SOURCES =		\
-	$(LH_BACKEND_PROTOCOL_SOURCES)
+	$(INPUT_NODIST_SOURCES)
 BUILT_SOURCES += $(nodist_qcom_backend_la_SOURCES)
 endif
 

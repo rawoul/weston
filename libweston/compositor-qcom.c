@@ -19,11 +19,20 @@
 
 #include <drm_fourcc.h>
 
-#include "compositor-qcom.h"
+#include "config.h"
+
+#ifdef ENABLE_LH_INPUT
+# include "lh-input.h"
+#else
+# include <libudev.h>
+# include "libinput-seat.h"
+#endif
+
 #include "compositor.h"
-#include "lh-input.h"
+#include "compositor-qcom.h"
 #include "pixman-renderer.h"
 #include "presentation-time-server-protocol.h"
+#include "launcher-util.h"
 #include "linux-dmabuf.h"
 #include "shared/helpers.h"
 
@@ -67,7 +76,6 @@ struct qcom_hwinfo {
 struct qcom_backend {
 	struct weston_backend base;
 	struct weston_compositor *compositor;
-	struct input_lh input;
 	uint32_t output_transform;
 
 	int ion_fd;
@@ -83,6 +91,13 @@ struct qcom_backend {
 	struct weston_layer background_layer;
 	struct weston_surface *background_surface;
 	struct weston_view *background_view;
+
+#ifdef ENABLE_LH_INPUT
+	struct input_lh input;
+#else
+	struct udev *udev;
+	struct udev_input input;
+#endif
 };
 
 typedef void (*qcom_fence_cb_t)(struct qcom_fence *fence, void *data);
@@ -1759,6 +1774,47 @@ qcom_init_hw_info(struct qcom_backend *backend)
 	return 0;
 }
 
+static int
+qcom_input_init(struct qcom_backend *b)
+{
+#ifdef ENABLE_LH_INPUT
+	if (input_lh_init(&b->input, b->compositor) < 0) {
+		weston_log("failed to create input devices\n");
+		return -1;
+	}
+#else
+	b->compositor->launcher = weston_launcher_connect(b->compositor, 1,
+							  "seat0", false);
+	if (b->compositor->launcher == NULL) {
+		weston_log("fatal: qcom backend should be run "
+			   "using weston-launch binary or as root\n");
+		return -1;
+	}
+
+	b->udev = udev_new();
+	if (b->udev == NULL) {
+		weston_launcher_destroy(b->compositor->launcher);
+		weston_log("failed to initialize udev context\n");
+		return -1;
+	}
+
+	udev_input_init(&b->input, b->compositor, b->udev, "seat0", NULL);
+#endif
+
+	return 0;
+}
+
+static void
+qcom_input_shutdown(struct qcom_backend *b)
+{
+#ifdef ENABLE_LH_INPUT
+	input_lh_shutdown(&b->input);
+#else
+	udev_unref(b->udev);
+	udev_input_destroy(&b->input);
+#endif
+}
+
 static void
 qcom_restore(struct weston_compositor *compositor)
 {
@@ -1773,7 +1829,9 @@ qcom_destroy(struct weston_compositor *compositor)
 	wl_list_for_each_safe(plane, next, &b->plane_list, link)
 		qcom_plane_destroy(plane);
 
-	input_lh_shutdown(&b->input);
+	qcom_input_shutdown(b);
+	if (compositor->launcher)
+		weston_launcher_destroy(compositor->launcher);
 	weston_compositor_shutdown(compositor);
 
 	if (close(b->ion_fd) < 0)
@@ -1871,10 +1929,8 @@ qcom_backend_create(struct weston_compositor *compositor,
 		goto err_ion;
 	}
 
-	if (input_lh_init(&b->input, compositor) < 0) {
-		weston_log("failed to create input devices\n");
+	if (qcom_input_init(b) < 0)
 		goto err_ion;
-	}
 
 	weston_compositor_set_presentation_clock(compositor, CLOCK_MONOTONIC);
 
@@ -1897,10 +1953,10 @@ qcom_backend_create(struct weston_compositor *compositor,
 
 	return b;
 
+err_input:
+	qcom_input_shutdown(b);
 err_ion:
 	close(b->ion_fd);
-err_input:
-	input_lh_shutdown(&b->input);
 err_free:
 	free(b);
 	return NULL;
