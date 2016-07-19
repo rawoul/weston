@@ -74,7 +74,7 @@ libweston_@LIBWESTON_MAJOR@_la_CPPFLAGS = $(AM_CPPFLAGS) -DIN_WESTON
 libweston_@LIBWESTON_MAJOR@_la_CFLAGS = $(AM_CFLAGS) $(COMPOSITOR_CFLAGS) $(LIBUNWIND_CFLAGS)
 libweston_@LIBWESTON_MAJOR@_la_LIBADD = $(COMPOSITOR_LIBS) $(LIBUNWIND_LIBS) \
 	$(DLOPEN_LIBS) -lm $(CLOCK_GETTIME_LIBS) \
-	$(LIBINPUT_BACKEND_LIBS) libshared.la
+	libshared.la
 libweston_@LIBWESTON_MAJOR@_la_LDFLAGS = -version-info $(LT_VERSION_INFO)
 
 libweston_@LIBWESTON_MAJOR@_la_SOURCES =			\
@@ -189,8 +189,7 @@ weston_CPPFLAGS = $(AM_CPPFLAGS) -DIN_WESTON 		\
 weston_CFLAGS = $(AM_CFLAGS) $(COMPOSITOR_CFLAGS) $(LIBUNWIND_CFLAGS)
 weston_LDADD = libshared.la libweston-@LIBWESTON_MAJOR@.la \
 	$(COMPOSITOR_LIBS) $(LIBUNWIND_LIBS) \
-	$(DLOPEN_LIBS) $(LIBINPUT_BACKEND_LIBS) \
-	-lm
+	$(DLOPEN_LIBS) -lm
 
 weston_SOURCES = 					\
 	compositor/main.c				\
