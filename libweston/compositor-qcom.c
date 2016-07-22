@@ -87,6 +87,7 @@ struct qcom_backend {
 	struct wl_list plane_list;
 
 	uint32_t assigned_pipes;
+	bool debug_planes;
 
 	struct weston_layer background_layer;
 	struct weston_surface *background_surface;
@@ -537,6 +538,8 @@ fill_layer_config(struct qcom_backend *backend,
 
 	left->pipe_ndx = plane->left->index;
 	left->alpha = plane->alpha;
+	if (backend->debug_planes)
+		left->alpha *= 0.8;
 	left->color_space = MDP_CSC_ITU_R_709;
 	left->src_rect = plane->src;
 	left->dst_rect = plane->dst;
@@ -1854,6 +1857,10 @@ debug_binding(struct weston_keyboard *keyboard, uint32_t time, uint32_t key,
 			output->disable_planes ^= 1;
 		weston_compositor_schedule_repaint(b->compositor);
 		break;
+	case KEY_P:
+		b->debug_planes ^= 1;
+		weston_compositor_schedule_repaint(b->compositor);
+		break;
 	default:
 		break;
 	}
@@ -1949,6 +1956,8 @@ qcom_backend_create(struct weston_compositor *compositor,
 	compositor->backend = &b->base;
 
 	weston_compositor_add_debug_binding(compositor, KEY_C,
+					    debug_binding, b);
+	weston_compositor_add_debug_binding(compositor, KEY_P,
 					    debug_binding, b);
 
 	return b;
