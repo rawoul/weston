@@ -1062,6 +1062,7 @@ register_device(struct input_lh *input, struct input_lh_seat *seat,
 			case LH_BUS_IR:
 			case LH_BUS_CEC:
 			case LH_BUS_RTI:
+			case LH_BUS_VIRTUAL:
 				device->keyboard_caps = WESTON_KEYBOARD_DIGITS;
 				break;
 			default:
