@@ -18,6 +18,7 @@
 
 #include "compositor.h"
 #include "compositor-ice.h"
+#include "lh-input.h"
 #include "pixman-renderer.h"
 #include "gdl-buffer.h"
 #include "ice-renderer.h"
@@ -59,6 +60,7 @@ enum ice_sideband_type {
 struct ice_backend {
 	struct weston_backend base;
 	struct weston_compositor *compositor;
+	struct input_lh input;
 	struct wl_event_source *gdl_event_source;
 	int gdl_event_fd;
 	int use_pixman;
@@ -208,6 +210,7 @@ ice_destroy(struct weston_compositor *ec)
 		close(b->gdl_event_fd);
 	}
 
+	input_lh_shutdown(&b->input);
 	weston_compositor_shutdown(ec);
 	free(b);
 
@@ -2603,6 +2606,11 @@ ice_backend_create(struct weston_compositor *compositor,
 
 	if (create_background(b) < 0) {
 		weston_log("failed to create background surface");
+		goto err_gdl;
+	}
+
+	if (input_lh_init(&b->input, compositor) < 0) {
+		weston_log("failed to create input devices\n");
 		goto err_gdl;
 	}
 

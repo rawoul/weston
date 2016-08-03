@@ -448,6 +448,7 @@ ice_backend_la_LDFLAGS = -module -avoid-version
 ice_backend_la_LIBADD =				\
 	$(COMPOSITOR_LIBS)			\
 	$(ICE_COMPOSITOR_LIBS)			\
+	$(LH_BACKEND_LIBS)			\
 	libshared.la
 ice_backend_la_CPPFLAGS =			\
 	$(AM_CPPFLAGS)				\
@@ -456,14 +457,17 @@ ice_backend_la_CFLAGS =				\
 	$(COMPOSITOR_CFLAGS)			\
 	$(ICE_COMPOSITOR_CFLAGS)		\
 	$(PIXMAN_CFLAGS)			\
+	$(LH_BACKEND_CFLAGS)			\
 	$(AM_CFLAGS)
 ice_backend_la_SOURCES =			\
 	libweston/compositor-ice.c		\
 	libweston/ice-renderer.c		\
-	xwayland/hash.c
+	xwayland/hash.c				\
+	$(LH_BACKEND_SOURCES)
 nodist_ice_backend_la_SOURCES =			\
 	protocol/gdl-protocol.c			\
-	protocol/gdl-server-protocol.h
+	protocol/gdl-server-protocol.h		\
+	$(LH_BACKEND_PROTOCOL_SOURCES)
 BUILT_SOURCES += $(nodist_ice_backend_la_SOURCES)
 endif
 

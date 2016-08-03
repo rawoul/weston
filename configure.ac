@@ -260,6 +260,7 @@ AM_CONDITIONAL(ENABLE_ICE_COMPOSITOR, test "x$enable_ice_compositor" = "xyes")
 if test "x$enable_ice_compositor" = "xyes"; then
   AC_DEFINE([BUILD_ICE_COMPOSITOR], [1], [Build the compositor for IntelCE SOC])
   PKG_CHECK_MODULES(ICE_COMPOSITOR, [system_utils gdl gma srb])
+  need_liblh="yes"
 fi
 
 
