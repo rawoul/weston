@@ -2561,6 +2561,8 @@ create_background(struct ice_backend *b)
 	pixman_region32_init(&surface->input);
 
 	weston_view_set_position(view, 0, 0);
+	view->surface->is_mapped = true;
+	view->is_mapped = true;
 
 	weston_layer_init(&b->background_layer,
 			  &b->compositor->cursor_layer.link);
