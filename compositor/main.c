@@ -62,6 +62,7 @@
 #include "compositor-rdp.h"
 #include "compositor-fbdev.h"
 #include "compositor-ice.h"
+#include "compositor-qcom.h"
 #include "compositor-x11.h"
 #include "compositor-wayland.h"
 #include "windowed-output-api.h"
@@ -530,6 +531,9 @@ usage(int error_code)
 #if defined(BUILD_ICE_COMPOSITOR)
 			"\t\t\t\tice-backend.so\n"
 #endif
+#if defined(BUILD_QCOM_COMPOSITOR)
+			"\t\t\t\tqcom-backend.so\n"
+#endif
 #if defined(BUILD_HEADLESS_COMPOSITOR)
 			"\t\t\t\theadless-backend.so\n"
 #endif
@@ -573,6 +577,13 @@ usage(int error_code)
 	fprintf(stderr,
 		"Options for ice-backend.so:\n\n"
 		"  --use-pixman\t\tUse the pixman (CPU) renderer\n"
+		"\n");
+#endif
+
+#if defined(BUILD_QCOM_COMPOSITOR)
+	fprintf(stderr,
+		"Options for qcom-backend.so:\n\n"
+		"  --device=DEVICE\tThe framebuffer device to use\n"
 		"\n");
 #endif
 
@@ -1419,6 +1430,42 @@ load_ice_backend(struct weston_compositor *c,
 					      &config.base);
 }
 
+static int
+load_qcom_backend(struct weston_compositor *c,
+		  int *argc, char **argv, struct weston_config *wc)
+{
+	struct weston_qcom_backend_config config = {{ 0, }};
+	struct weston_config_section *section;
+	char *s = NULL;
+	int ret = 0;
+
+	const struct weston_option qcom_options[] = {
+		{ WESTON_OPTION_STRING, "device", 0, &config.device },
+	};
+
+	parse_options(qcom_options, ARRAY_LENGTH(qcom_options), argc, argv);
+
+	if (!config.device)
+		config.device = strdup("/dev/fb0");
+
+	section = weston_config_get_section(wc, "output", "name", "qcom");
+	weston_config_section_get_string(section, "transform", &s, "normal");
+	if (weston_parse_transform(s, &config.output_transform) < 0)
+		weston_log("Invalid transform \"%s\" for output qcom\n", s);
+	free(s);
+
+	config.base.struct_version = WESTON_QCOM_BACKEND_CONFIG_VERSION;
+	config.base.struct_size = sizeof(struct weston_qcom_backend_config);
+
+	/* load the actual wayland backend and configure it */
+	ret = weston_compositor_load_backend(c, WESTON_BACKEND_QCOM,
+					     &config.base);
+
+	free(config.device);
+
+	return ret;
+}
+
 static void
 x11_backend_output_configure(struct wl_listener *listener, void *data)
 {
@@ -1674,6 +1721,8 @@ load_backend(struct weston_compositor *compositor, const char *backend,
 		return load_fbdev_backend(compositor, argc, argv, config);
 	else if (strstr(backend, "ice-backend.so"))
 		return load_ice_backend(compositor, argc, argv, config);
+	else if (strstr(backend, "qcom-backend.so"))
+		return load_qcom_backend(compositor, argc, argv, config);
 	else if (strstr(backend, "drm-backend.so"))
 		return load_drm_backend(compositor, argc, argv, config);
 	else if (strstr(backend, "x11-backend.so"))

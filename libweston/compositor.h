@@ -1589,6 +1589,7 @@ enum weston_compositor_backend {
 	WESTON_BACKEND_WAYLAND,
 	WESTON_BACKEND_X11,
 	WESTON_BACKEND_ICE,
+	WESTON_BACKEND_QCOM,
 };
 
 int

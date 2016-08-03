@@ -272,6 +272,17 @@ if test "x$enable_ice_compositor" = "xyes"; then
 fi
 
 
+AC_ARG_ENABLE(qcom-compositor,
+	      AS_HELP_STRING([--enable-qcom-compositor],
+	                     [build the Qualcomm backend]),,
+	      enable_qcom_compositor=no)
+AM_CONDITIONAL(ENABLE_QCOM_COMPOSITOR, test "x$enable_qcom_compositor" = "xyes")
+if test "x$enable_qcom_compositor" = "xyes"; then
+  AC_DEFINE([BUILD_QCOM_COMPOSITOR], [1], [Build the compositor for Qualcomm SOC])
+  need_liblh="yes"
+fi
+
+
 AC_ARG_ENABLE([fbdev-compositor], [  --enable-fbdev-compositor],,
               enable_fbdev_compositor=yes)
 AM_CONDITIONAL([ENABLE_FBDEV_COMPOSITOR],
@@ -756,6 +767,7 @@ AC_MSG_RESULT([
 	FBDEV Compositor		${enable_fbdev_compositor}
 	RDP Compositor			${enable_rdp_compositor}
 	IntelCE Compositor		${enable_ice_compositor}
+	Qualcomm Compositor		${enable_qcom_compositor}
 	Screen Sharing			${enable_screen_sharing}
 	JUnit XML output		${enable_junit_xml}
 
