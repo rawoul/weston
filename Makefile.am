@@ -275,7 +275,7 @@ pkgconfig_DATA = \
 wayland_sessiondir = $(datadir)/wayland-sessions
 dist_wayland_session_DATA = compositor/weston.desktop
 
-libwestonincludedir = $(includedir)/libweston-${LIBWESTON_MAJOR}
+libwestonincludedir = $(includedir)/libweston-${LIBWESTON_MAJOR}/weston
 libwestoninclude_HEADERS =			\
 	libweston/version.h			\
 	libweston/compositor.h			\
