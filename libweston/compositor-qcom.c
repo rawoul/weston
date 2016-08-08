@@ -592,13 +592,14 @@ fill_layer_config(struct qcom_backend *backend,
 	}
 
 	dbg("config left layer=%x z=%d a=%d "
-	    "buffer=%u(%u)x%u "
+	    "fmt=%u buffer=%u(%u)x%u "
 	    "src=%ux%u+%u+%u "
 	    "dst=%ux%u+%u+%u "
 	    "decimate=%ux%u\n",
 	    left->pipe_ndx,
 	    left->z_order,
 	    left->alpha,
+	    left->buffer.format,
 	    left->buffer.width,
 	    left->buffer.planes[0].stride, left->buffer.height,
 	    left->src_rect.w, left->src_rect.h,
@@ -915,41 +916,27 @@ qcom_output_prepare_overlay_view(struct qcom_output *output,
 		     plane->dst.w, plane->dst.h, plane->dst.x, plane->dst.y);
 
 	// check opaque region when using a pixel format with alpha
-	if (mdp_format_has_alpha(fb->format) &&
-	    pixman_region32_not_empty(&surface->opaque)) {
-		pixman_region32_t non_opaque;
-
-		pixman_region32_init_rect(&non_opaque, 0, 0,
-					  surface->width, surface->height);
-		pixman_region32_subtract(&non_opaque, &non_opaque,
-					 &surface->opaque);
-
-		if (pixman_region32_not_empty(&non_opaque)) {
-			pixman_region32_fini(&non_opaque);
-			dbg_continue(" -> argb surface not totally opaque\n");
-			goto reject;
-		}
-
-		pixman_region32_fini(&non_opaque);
-
-#if 0
-		uint32_t xformat;
-
-		xformat = mdp_format_without_alpha(fb->format);
-		if (xformat == MDP_INVALID_FORMAT) {
-			dbg_continue(" ->  opaque surface with alpha format\n");
-			return NULL;
-		}
-
-		plane->format = xformat;
-#else
-		plane->format = fb->format;
-#endif
+	if (!mdp_format_has_alpha(fb->format)) {
 		plane->blend_op = BLEND_OP_OPAQUE;
 	} else {
-		plane->format = fb->format;
-		plane->blend_op = BLEND_OP_NOT_DEFINED;
+		pixman_box32_t surf_rect = { 0, 0,
+			surface->width, surface->height };
+
+		switch (pixman_region32_contains_rectangle(&surface->opaque,
+							   &surf_rect)) {
+		case PIXMAN_REGION_IN:
+			plane->blend_op = BLEND_OP_OPAQUE;
+			break;
+		case PIXMAN_REGION_OUT:
+			plane->blend_op = BLEND_OP_PREMULTIPLIED;
+			break;
+		case PIXMAN_REGION_PART:
+			dbg_continue(" -> argb surface partly opaque\n");
+			goto reject;
+		}
 	}
+
+	plane->format = fb->format;
 
 	// convert output coordinates back to buffer coordinates
 	weston_surface_to_buffer_float(surface, sx1, sy1, &sx1, &sy1);
