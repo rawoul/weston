@@ -636,7 +636,7 @@ weston_desktop_xdg_toplevel_committed(struct weston_desktop_xdg_toplevel *toplev
 
 	if (toplevel->next_state.maximized || toplevel->next_state.fullscreen)
 		reconfigure =
-			( ( toplevel->requested_size.width != wsurface->width ) ||
+			( ( toplevel->requested_size.width != wsurface->width ) &&
 			  ( toplevel->requested_size.height != wsurface->height ) );
 
 	if (reconfigure) {
