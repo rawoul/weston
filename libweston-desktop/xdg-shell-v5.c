@@ -213,7 +213,7 @@ weston_desktop_xdg_surface_committed(struct weston_desktop_surface *dsurface,
 	bool reconfigure = false;
 
 	if (surface->next_state.maximized || surface->next_state.fullscreen)
-		reconfigure = surface->requested_size.width != wsurface->width ||
+		reconfigure = surface->requested_size.width != wsurface->width &&
 			      surface->requested_size.height != wsurface->height;
 
 	if (reconfigure) {
