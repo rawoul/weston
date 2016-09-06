@@ -254,6 +254,7 @@ launcher_weston_launch_connect(struct weston_launcher **out, struct weston_compo
 
 		return 0;
 	} else {
+		free(launcher);
 		return -1;
 	}
 }
