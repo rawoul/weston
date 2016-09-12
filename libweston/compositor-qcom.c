@@ -243,7 +243,7 @@ find_plane(struct qcom_backend *backend)
 {
 	struct qcom_plane *plane;
 
-	wl_list_for_each(plane, &backend->plane_list, link) {
+	wl_list_for_each_reverse(plane, &backend->plane_list, link) {
 		if (plane->next == NULL)
 			return plane;
 	}
@@ -667,7 +667,7 @@ qcom_output_commit(struct qcom_output *output)
 		plane->dst = plane->src;
 		plane->zorder = output->zorder;
 		plane->format = fb->format;
-		plane->blend_op = BLEND_OP_OPAQUE;
+		plane->blend_op = BLEND_OP_PREMULTIPLIED;
 
 		plane->left = find_pipe(backend, PIPE_TYPE_RGB);
 		if (!plane->left)
@@ -755,7 +755,7 @@ qcom_output_repaint(struct weston_output *base, pixman_region32_t *damage)
 		return -1;
 
 	/* reset output plane layout */
-	output->zorder = backend->hwinfo.n_blending_stages - 1;
+	output->zorder = 0;
 	backend->assigned_pipes = 0;
 
 	return 0;
@@ -1001,7 +1001,7 @@ qcom_output_prepare_overlay_view(struct qcom_output *output,
 	}
 
 	plane->alpha = roundf(weston_view_get_alpha(view) * 255.0f);
-	plane->zorder = output->zorder--;
+	plane->zorder = output->zorder++;
 	plane->next = fb;
 
 	fb->output = output;
@@ -1097,7 +1097,7 @@ qcom_output_assign_planes(struct weston_output *base)
 
 	pixman_region32_init(&composited_region);
 
-	wl_list_for_each(ev, &compositor->view_list, link) {
+	wl_list_for_each_reverse(ev, &compositor->view_list, link) {
 		plane = qcom_output_assign_plane(output, ev,
 						 &composited_region);
 		weston_view_move_to_plane(ev, plane);
@@ -1549,7 +1549,7 @@ qcom_output_create(struct qcom_backend *backend, const char *device)
 	output->base.make = "Freebox";
 	output->base.model = output->fb_info.id;
 	output->base.name = strdup("fbdev");
-	output->zorder = backend->hwinfo.n_blending_stages - 1;
+	output->zorder = 0;
 
 	weston_output_init(&output->base, backend->compositor,
 	                   0, 0, 0, 0, backend->output_transform, 1);
