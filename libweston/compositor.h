@@ -1025,6 +1025,9 @@ struct weston_surface_state {
 	/* wl_surface.damage_buffer */
 	pixman_region32_t damage_buffer;
 
+	/* Internal damage, e.g. when restacking subsurfaces */
+	bool damage_pending;
+
 	/* wl_surface.set_opaque_region */
 	pixman_region32_t opaque;
 
