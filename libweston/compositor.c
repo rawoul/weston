@@ -3400,6 +3400,14 @@ subsurface_committed(struct weston_surface *surface, int32_t dx, int32_t dy)
 		 * parent surface does get mapped, this one will get
 		 * included, too. See view_list_add().
 		 */
+
+		/* XXX: HACK: force redraw so that the subsurface view is
+		 * created and shown if it wasn't. Since the view creation
+		 * and the output assignment for the surface only happens
+		 * at redraw time, this is the only to make this use case
+		 * work.
+		 */
+		weston_compositor_schedule_repaint(surface->compositor);
 	}
 }
 
