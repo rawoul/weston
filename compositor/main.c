@@ -1430,6 +1430,16 @@ load_ice_backend(struct weston_compositor *c,
 					      &config.base);
 }
 
+static void
+qcom_backend_output_configure(struct wl_listener *listener, void *data)
+{
+	struct weston_output *output = data;
+
+	weston_output_set_transform(output, WL_OUTPUT_TRANSFORM_NORMAL);
+	weston_output_set_scale(output, 1);
+	weston_output_enable(output);
+}
+
 static int
 load_qcom_backend(struct weston_compositor *c,
 		  int *argc, char **argv, struct weston_config *wc)
@@ -1456,6 +1466,8 @@ load_qcom_backend(struct weston_compositor *c,
 
 	config.base.struct_version = WESTON_QCOM_BACKEND_CONFIG_VERSION;
 	config.base.struct_size = sizeof(struct weston_qcom_backend_config);
+
+	wet_set_pending_output_handler(c, qcom_backend_output_configure);
 
 	/* load the actual wayland backend and configure it */
 	ret = weston_compositor_load_backend(c, WESTON_BACKEND_QCOM,

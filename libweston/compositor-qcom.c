@@ -76,7 +76,6 @@ struct qcom_hwinfo {
 struct qcom_backend {
 	struct weston_backend base;
 	struct weston_compositor *compositor;
-	uint32_t output_transform;
 
 	int ion_fd;
 
@@ -125,16 +124,6 @@ struct qcom_fb {
 	struct weston_buffer_reference buffer_ref;
 };
 
-struct qcom_screeninfo {
-	unsigned int x_resolution; /* pixels, visible area */
-	unsigned int y_resolution; /* pixels, visible area */
-	unsigned int width_mm; /* visible screen width in mm */
-	unsigned int height_mm; /* visible screen height in mm */
-	unsigned int bits_per_pixel;
-	unsigned int refresh_rate; /* Hertz */
-	char id[16]; /* screen identifier */
-};
-
 struct qcom_output {
 	struct qcom_backend *backend;
 	struct weston_output base;
@@ -144,10 +133,8 @@ struct qcom_output {
 	int vsync_fd;
 	struct wl_event_source *vsync_event;
 
-	/* Frame buffer details. */
-	char *device;
 	int fd;
-	struct qcom_screeninfo fb_info;
+	char name[16];
 	struct qcom_fb *fb[2];
 	pixman_image_t *image[2];
 	int current_fb;
@@ -173,7 +160,6 @@ struct qcom_plane {
 };
 
 static int qcom_fbdev_vsync_on(struct qcom_output *output);
-static int qcom_fbdev_vsync_off(struct qcom_output *output);
 
 static void qcom_output_release_fb(struct qcom_output *output,
 				   struct qcom_fb *fb);
@@ -1297,94 +1283,6 @@ qcom_output_release_fb(struct qcom_output *output, struct qcom_fb *fb)
 }
 
 static int
-qcom_query_refresh_rate(int fd)
-{
-	struct msmfb_metadata metadata;
-
-	memset(&metadata, 0, sizeof(metadata));
-	metadata.op = metadata_op_frame_rate;
-
-	if (ioctl(fd, MSMFB_METADATA_GET, &metadata) < 0) {
-		weston_log("failed to get framebuffer frame rate: %m\n");
-		return -1;
-	}
-
-	return metadata.data.panel_frame_rate;
-}
-
-static int
-qcom_query_screen_info(struct qcom_output *output, int fd,
-		       struct qcom_screeninfo *info)
-{
-	struct fb_var_screeninfo varinfo;
-	struct fb_fix_screeninfo fixinfo;
-
-	if (ioctl(fd, FBIOGET_FSCREENINFO, &fixinfo) < 0 ||
-	    ioctl(fd, FBIOGET_VSCREENINFO, &varinfo) < 0) {
-		return -1;
-	}
-
-	info->x_resolution = varinfo.xres;
-	info->y_resolution = varinfo.yres;
-
-	if (varinfo.width <= 0 || varinfo.height <= 0) {
-		info->width_mm = roundf(varinfo.xres * 25.4f / 96.0f);
-		info->height_mm = roundf(varinfo.yres * 25.4f / 96.0f);
-	} else {
-		info->width_mm = varinfo.width;
-		info->height_mm = varinfo.height;
-	}
-
-	info->bits_per_pixel = varinfo.bits_per_pixel;
-	strncpy(info->id, fixinfo.id, sizeof(info->id));
-	info->id[sizeof(info->id)-1] = '\0';
-	info->refresh_rate = qcom_query_refresh_rate(fd);
-
-	return 1;
-}
-
-static void
-qcom_fbdev_destroy(struct qcom_output *output)
-{
-	weston_log("destroying fbdev frame buffer.\n");
-
-	qcom_fence_destroy(output->current_fence);
-	qcom_fence_destroy(output->next_fence);
-	qcom_fbdev_vsync_off(output);
-
-	if (close(output->fd) < 0)
-		weston_log("failed to close frame buffer: %m\n");
-
-	output->fd = -1;
-}
-
-static int
-qcom_fbdev_open(struct qcom_output *output, const char *fb_dev,
-		struct qcom_screeninfo *screen_info)
-{
-	int fd;
-
-	weston_log("opening fbdev frame buffer\n");
-
-	fd = open(fb_dev, O_RDWR | O_CLOEXEC);
-	if (fd < 0) {
-		weston_log("failed to open frame buffer device ‘%s’: %m\n",
-			   fb_dev);
-		return -1;
-	}
-
-	if (qcom_query_screen_info(output, fd, screen_info) < 0) {
-		weston_log("failed to get frame buffer info: %m\n");
-		close(fd);
-		return -1;
-	}
-
-	output->fd = fd;
-
-	return 0;
-}
-
-static int
 qcom_fbdev_vsync_on(struct qcom_output *output)
 {
 	struct wl_event_loop *loop;
@@ -1491,7 +1389,9 @@ qcom_output_destroy(struct weston_output *base)
 
 	weston_log("destroying fbdev output\n");
 
-	qcom_fbdev_destroy(output);
+	qcom_fence_destroy(output->current_fence);
+	qcom_fence_destroy(output->next_fence);
+	qcom_fbdev_vsync_off(output);
 
 	pixman_region32_fini(&output->previous_damage);
 
@@ -1505,74 +1405,121 @@ qcom_output_destroy(struct weston_output *base)
 			pixman_image_unref(output->image[i]);
 	}
 
+	if (close(output->fd) < 0)
+		weston_log("failed to close frame buffer: %m\n");
+
 	weston_output_destroy(&output->base);
 
-	free(output->device);
 	free(output);
 }
 
 static int
-qcom_output_create(struct qcom_backend *backend, const char *device)
+qcom_output_update_info(struct qcom_output *output)
 {
-	struct qcom_output *output;
+	struct fb_fix_screeninfo fixinfo;
+	struct fb_var_screeninfo varinfo;
+	struct msmfb_metadata metadata;
 
-	weston_log("creating fbdev output\n");
-
-	output = zalloc(sizeof *output);
-	if (output == NULL)
+	if (ioctl(output->fd, FBIOGET_VSCREENINFO, &varinfo) < 0) {
+		weston_log("ioctl/FBIOGET_VSCREENINFO: %m\n");
 		return -1;
+	}
 
-	output->backend = backend;
-	output->device = strdup(device);
-	output->vsync_fd = -1;
+	if (ioctl(output->fd, FBIOGET_FSCREENINFO, &fixinfo) < 0) {
+		weston_log("ioctl/FBIOGET_FSCREENINFO: %m\n");
+		return -1;
+	}
 
-	if (qcom_fbdev_open(output, device, &output->fb_info) < 0)
-		goto err_free;
+	memset(&metadata, 0, sizeof(metadata));
+	metadata.op = metadata_op_frame_rate;
 
-	output->base.start_repaint_loop = qcom_output_start_repaint_loop;
-	output->base.assign_planes = qcom_output_assign_planes;
-	output->base.repaint = qcom_output_repaint;
-	output->base.destroy = qcom_output_destroy;
-	//output->base.disable_planes = 1;
+	if (ioctl(output->fd, MSMFB_METADATA_GET, &metadata) < 0) {
+		weston_log("ioctl/MSMFB_METADATA_GET: %m\n");
+		return -1;
+	}
 
-	/* only one static mode in list */
 	output->mode.flags =
 		WL_OUTPUT_MODE_CURRENT | WL_OUTPUT_MODE_PREFERRED;
-	output->mode.width = output->fb_info.x_resolution;
-	output->mode.height = output->fb_info.y_resolution;
-	output->mode.refresh = output->fb_info.refresh_rate;
+	output->mode.width = varinfo.xres;
+	output->mode.height = varinfo.yres;
+	output->mode.refresh = metadata.data.panel_frame_rate;
+
 	wl_list_init(&output->base.mode_list);
 	wl_list_insert(&output->base.mode_list, &output->mode.link);
+
+	strncpy(output->name, fixinfo.id, sizeof (output->name));
+	output->name[sizeof (output->name) - 1] = '\0';
 
 	output->base.current_mode = &output->mode;
 	output->base.subpixel = WL_OUTPUT_SUBPIXEL_UNKNOWN;
 	output->base.make = "Freebox";
-	output->base.model = output->fb_info.id;
-	output->base.name = strdup("fbdev");
+	output->base.model = output->name;
+
+	return 0;
+}
+
+static int
+qcom_output_enable(struct weston_output *base)
+{
+	struct qcom_output *output = qcom_output(base);
+	struct qcom_backend *backend = output->backend;
+
+	output->base.start_repaint_loop = qcom_output_start_repaint_loop;
+	output->base.assign_planes = qcom_output_assign_planes;
+	output->base.repaint = qcom_output_repaint;
+	//output->base.disable_planes = 1;
 	output->zorder = 0;
 
-	weston_output_init(&output->base, backend->compositor,
-	                   0, 0, 0, 0, backend->output_transform, 1);
-
 	if (qcom_output_init_pixman(output) < 0)
-		goto err_output;
-
-	weston_compositor_add_output(backend->compositor, &output->base);
+		return -1;
 
 	weston_log("fbdev output %d×%d@%dHz\n",
 		   output->mode.width, output->mode.height,
 		   output->mode.refresh / 1000);
 
 	return 0;
+}
 
-err_output:
-	weston_output_destroy(&output->base);
+static int
+qcom_output_create(struct qcom_backend *backend, const char *device)
+{
+	struct qcom_output *output;
+	int fd;
 
-err_free:
-	qcom_fbdev_destroy(output);
-	free(output->device);
-	free(output);
-	return -1;
+	weston_log("creating mdp output\n");
+
+	output = zalloc(sizeof *output);
+	if (output == NULL)
+		return -1;
+
+	fd = open(device, O_RDWR | O_CLOEXEC);
+	if (fd < 0) {
+		weston_log("failed to open frame buffer device ‘%s’: %m\n",
+			   device);
+		free(output);
+		return -1;
+	}
+
+	output->backend = backend;
+	output->fd = fd;
+	output->vsync_fd = -1;
+
+	if (qcom_output_update_info(output)) {
+		close(fd);
+		free(output);
+		return -1;
+	}
+
+	output->base.name = strdup("mdp");
+	output->base.destroy = qcom_output_destroy;
+	output->base.enable = qcom_output_enable;
+	output->base.disable = NULL;
+
+	weston_output_init(&output->base, backend->compositor);
+	weston_compositor_add_pending_output(&output->base,
+					     backend->compositor);
+
+	return 0;
 }
 
 static void
@@ -1912,7 +1859,6 @@ qcom_backend_create(struct weston_compositor *compositor,
 	b->base.destroy = qcom_destroy;
 	b->base.restore = qcom_restore;
 
-	b->output_transform = config->output_transform;
 	wl_list_init(&b->plane_list);
 
 	if (pixman_renderer_init(compositor) < 0)
@@ -1962,7 +1908,6 @@ static void
 config_init_to_defaults(struct weston_qcom_backend_config *config)
 {
 	config->device = "/dev/fb0";
-	config->output_transform = WL_OUTPUT_TRANSFORM_NORMAL;
 }
 
 WL_EXPORT int
