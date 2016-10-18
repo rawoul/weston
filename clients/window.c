@@ -3105,6 +3105,10 @@ process_key_press(xkb_keysym_t sym, struct input *input)
 {
 	if (sym == XKB_KEY_NoSymbol)
 		return sym;
+
+	if (!input->xkb.compose_state)
+		return sym;
+
 	if (xkb_compose_state_feed(input->xkb.compose_state,
 				   sym) != XKB_COMPOSE_FEED_ACCEPTED)
 		return sym;
